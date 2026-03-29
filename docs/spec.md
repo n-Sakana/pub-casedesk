@@ -1,125 +1,157 @@
 # CaseDesk 仕様書
 
-最終更新: 2026-03-15
+最終更新: 2026-03-29
 
 ## 1. 概要
 
-CaseDesk は Excel VBA の案件管理ツール。テーブル (ListObject) をリアルタイムで読み書きし、メールアーカイブ・案件フォルダと突合して一画面で管理する。
+CaseDesk は Excel VBA の案件管理ツール。Excel テーブルを直接編集しつつ、watchbox が生成した mail / folder の `manifest.csv` を読み込んで案件情報を一画面で扱う。
 
 ## 2. 基本原則
 
-- **正本は Excel テーブル**。中間ファイルは持たない
-- **フィールド検出はセルデータから**。VarType・NumberFormat で型判定
-- **リアルタイム双方向同期**。フォーム編集→即テーブル書き込み、テーブル変更→SheetChange で即反映
-- **全変更をログに記録**。Change Log (ListObject, 5000行ローテーション)
-- **設定は Dictionary キャッシュ**。起動時シートから一括ロード、終了時シリアライズ
-- **WinAPI 禁止**。VBA 標準 + COM 標準のみ (Scripting.Dictionary, ADODB.Stream, WScript.Shell)
+- 正本は Excel テーブル
+- 外部収集は watchbox 側で行い、CaseDesk は `manifest.csv` を消費する
+- FE / BE は別 Excel プロセスに分ける
+- フィールド検出はセルデータから行う
+- Change Log は ListObject で保持し、5000 行でローテーションする
+- WinAPI は使わない
 
-## 3. アーキテクチャ
+## 3. 構成
 
-### 3.1 FE/BE 分離
+### 3.1 FE / BE 分離
 
-```
-FE: casedesk.xlsm (ユーザーの Excel)
-  ├── UI (frmCaseDesk, frmSettings, frmResize)
-  ├── CaseDeskMain       エントリポイント + BE管理
-  ├── CaseDeskData       FE側キャッシュ + テーブル操作
-  ├── CaseDeskLib        Config + ChangeLog + ユーティリティ
-  ├── ErrorHandler    エラー + ログ蓄積
-  ├── FieldEditor     WithEvents テキストボックス
-  ├── SheetWatcher    WithEvents テーブル監視
-  └── 隠しシート群
+```text
+FE: casedesk.xlsm
+  ├── frmCaseDesk / frmSettings
+  ├── CaseDeskMain
+  ├── CaseDeskData
+  ├── CaseDeskLib
+  ├── ErrorHandler / FieldEditor / SheetWatcher
+  └── hidden sheets
 
-BE: 別プロセスの Excel.Application (Visible=False)
-  └── CaseDeskWorker     スイッチ式スキャン + FEシート書き込み + リクエスト応答
+BE: 別プロセス Excel.Application
+  └── CaseDeskWorker
 ```
 
-### 3.2 BE→FE通信
+### 3.2 FE 側の責務
 
-BE が FE の隠しシートに `.Value` で書き込み → FE の `Workbook_SheetChange` が発火。
+- ワークブック内の ListObject 列挙
+- レコード表示と編集
+- hidden sheet からの FE キャッシュ再読込
+- 変更ログ表示
+- 設定のロード / 保存
 
-### 3.3 FE→BE通信 (リクエスト/レスポンス)
+### 3.3 BE 側の責務
 
-FE が BE の `_casedesk_request` シートに書き込み → BE の `SheetChange` → `Application.OnTime` で非同期処理 → 結果を FE のシートに書き込み → FE の `SheetChange` で受信。
+- mail manifest の読込
+- case root / folder manifest の読込
+- FE 用 hidden sheet 更新
+- 差分計算
+- バックグラウンド走査のスケジューリング
 
-### 3.4 スイッチ式スキャンループ
+## 4. UI
 
-5秒ポーリングではなく、1秒チャンク + 1秒 Yield の連続ループ:
+`frmCaseDesk` は 3 カラム構成。
 
+- 左: ソース選択、フィルタ、レコード一覧
+- 中央: 詳細 / Mail / Files タブ
+- 右: Change Log
+
+`frmResize` は現行実装に存在しない。リサイズハンドル `m_resizeHandle` と左右スプリッター `m_splitterLeft` `m_splitterRight` は `frmCaseDesk` が直接持つ。
+
+`frmCaseDeskV2` / `CaseDesk_ShowPanel2` も未実装。`docs/frmCaseDeskV2-design.md` は将来構想であり、現行仕様には含めない。
+
+## 5. 通信
+
+### 5.1 BE → FE
+
+BE は FE ワークブックの hidden sheet に `.Value` で直接書き込む。FE 側は `Workbook_SheetChange` を契機に `CaseDeskData.LoadFromLocalSheets` を呼び、ローカルキャッシュを更新する。
+
+### 5.2 FE → BE
+
+現行の FE → BE 通信は `_casedesk_request` シート経由ではない。起動時や設定変更時に `CaseDeskMain.StartWorker` / `CaseDeskWorker.UpdateConfig` を呼んで構成を渡す。
+
+`CaseDeskWorker` 内の request dispatcher は空で、稼働中のリクエスト応答仕様はない。
+
+## 6. スキャンループ
+
+`CaseDeskWorker.DoScanChunk` は 1 秒周期のラウンドロビン。
+
+```text
+TASK_MAIL
+  manifest.csv の更新確認
+  必要時のみ再読込
+
+TASK_CASES
+  case root / case manifest.csv の更新確認
+  必要時のみ再読込
+
+TASK_WRITE
+  変更があれば _casedesk_mail / _casedesk_cases / _casedesk_files / _casedesk_diff を更新
+  _casedesk_signal に version を書く
 ```
-DoScanChunk (1秒枠, ラウンドロビン)
-  TASK_MAIL:  manifest.tsv mtime チェック → 変化時は再読み
-  TASK_CASES: root mtime チェック → 変化時は Dir$ 列挙
-  TASK_WRITE: 変更があれば FE シートに書き込み + バージョン進行
-  → OnTime → YieldCallback
 
-YieldCallback
-  時計更新 (WriteClockToFE)
-  リクエスト確認・応答 (ProcessRequest)
-  → OnTime(+1s) → DoScanChunk
-```
+`YieldCallback` は次回実行を予約するだけで、旧仕様のリクエスト処理は持たない。
 
-ラウンドロビン (`g_nextTask`) で各タスクに公平に実行機会を与え、飢餓を防ぐ。通常運用は全タスク μs で通過。
-
-## 4. 隠しシート
+## 7. hidden sheets
 
 | シート | 用途 |
-|--------|------|
-| `_casedesk_config` | 設定 KV (起動時 Dict にロード) |
-| `_casedesk_sources` | ソーステーブル設定 |
+|---|---|
+| `_casedesk_config` | 設定 KV |
+| `_casedesk_sources` | ソース設定 |
 | `_casedesk_fields` | フィールド設定 |
-| `_casedesk_log` | 変更ログ (ListObject "CaseDeskLog") |
-| `_casedesk_signal` | A1:時刻, B1:バージョン, C1:タイミング |
-| `_casedesk_mail` | メールレコード (10列) |
-| `_casedesk_mail_idx` | メールインデックス (key→entry_id) |
+| `_casedesk_log` | Change Log |
+| `_casedesk_signal` | A1:時計 / B1:version / C1:timing |
+| `_casedesk_mail` | メールレコード |
+| `_casedesk_mail_idx` | メール索引 |
 | `_casedesk_cases` | 案件名一覧 |
-| `_casedesk_files` | ケースファイル (オンデマンド応答) |
-| `_casedesk_diff` | 差分ログ |
-| `_casedesk_request` | FE→BEリクエスト (A1:id, B1:type, C1+:params) |
+| `_casedesk_files` | 案件ファイル一覧 |
+| `_casedesk_diff` | mail / case 差分 |
 
-## 5. メールスキャン
+`_casedesk_request` は現行では作成も利用もしていないため、仕様から外す。
 
-### manifest.tsv (高速パス)
+## 8. メールデータ
 
-エクスポータ (CaseDeskMailExport) がメール追加時に `manifest.tsv` へ1行追記。スキャナは manifest.tsv の mtime をチェックし、変化時のみ全件再読みする (10万件 ~887ms)。
+CaseDesk は mail 側で `manifest.csv` を前提にする。コード上でも `RefreshMailData` は `folderPath\manifest.csv` を読む。
 
-### Dir$ fallback (マイグレーション)
+mail manifest の列:
 
-manifest.tsv がない場合、Dir$ + meta.json で全件スキャンし manifest.tsv を自動生成。初回のみ発生。
-
-## 6. ケースファイル (オンデマンド)
-
-起動時の全件プリロード廃止。ユーザーが案件を選択したとき:
-1. FE → `_casedesk_request` に `case_files` + case_id を書き込み
-2. BE → Dir$ で該当フォルダを走査 (~4ms)
-3. BE → FE の `_casedesk_files` に結果を書き込み
-4. FE → `SheetChange` で受信、ファイルタブを更新
-
-## 7. 設定管理
-
-- 起動時: 3つの隠しシート (`_casedesk_config`, `_casedesk_sources`, `_casedesk_fields`) → Dictionary に一括ロード
-- 実行中: Dictionary 引き (O(1))。変更は Dict に書き込み + `m_dirty` フラグ
-- 終了時: `BeforeWorkbookClose` → `SaveToSheets` でシートにシリアライズ
-
-## 8. エラーハンドリング
-
-```vba
-Dim eh As New ErrorHandler: eh.Enter "Module", "Proc"
-On Error GoTo ErrHandler
-eh.Log "processing " & count & " items"
-...
-eh.OK: Exit Sub
-ErrHandler: eh.Catch  ' エラー情報 + 蓄積ログ全件を Debug.Print
+```text
+entry_id,sender_email,sender_name,subject,received_at,folder_path,body_path,msg_path,attachment_paths,mail_folder,body_text
 ```
 
-正常時は `OK` でログクリア。エラー時は `Catch` で蓄積ログ全件 + 経過時間を出力。
+`manifest.tsv` 前提の説明は旧仕様。
 
-## 9. 制約
+## 9. 案件ファイルデータ
 
-| 項目 | 決定 | 理由 |
-|------|------|------|
-| WinAPI 禁止 | VBA 標準 + COM 標準のみ | 本番環境のポリシーで Declare がブロック |
-| BE分離 | 別プロセス Excel.Application | スキャンが FE をブロックしない |
-| シート直書き | BE→FE 隠しシート + SheetChange | TSV ファイル経由より速い |
-| ControlSource 不使用 | コードで読み書き | 異なるワークブック間で非対応 |
-| frmCaseDesk.Visible 直参照禁止 | g_formLoaded フラグ | VB_PredeclaredId=True で自動再生成される |
+CaseDesk は案件ファイルをオンデマンド取得しない。`WorkerInitialScan` と継続スキャンの中で `RefreshCaseFiles` を回し、`WriteCaseFilesToFE` で `_casedesk_files` に全件反映する。
+
+folder manifest の列:
+
+```text
+item_id,file_name,file_path,folder_path,relative_path,file_size,modified_at
+```
+
+watchbox の folder profile が `source_folder` ありならコピー同期、空なら manifest-only スキャンになる。
+
+## 10. 設定管理
+
+- 起動時に `_casedesk_config` `_casedesk_sources` `_casedesk_fields` を Dictionary へロード
+- 実行中は Dictionary を参照
+- 終了時に `BeforeWorkbookClose` → `CaseDeskLib.SaveToSheets`
+
+## 11. ログとエラー
+
+- Change Log は `_casedesk_log` 上の `CaseDeskLog`
+- 最大 5000 行
+- `ErrorHandler` は処理途中ログを蓄積し、失敗時にまとめて出す
+
+## 12. 制約
+
+| 項目 | 決定 |
+|---|---|
+| WinAPI 禁止 | VBA 標準 + COM 標準のみ |
+| BE 分離 | 別プロセス Excel.Application |
+| 外部データ連携 | watchbox 生成 `manifest.csv` を読む |
+| シート反映 | hidden sheet 直書き + SheetChange |
+| ControlSource 不使用 | コードで読み書き |
+| `frmCaseDesk.Visible` 直参照禁止 | `g_formLoaded` フラグで管理 |
