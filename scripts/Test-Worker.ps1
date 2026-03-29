@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $projectDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $mailDir = Join-Path $projectDir 'sample\mail'
 $caseDir = Join-Path $projectDir 'sample\cases'
-$xlsm = Join-Path $projectDir 'folio.xlsm'
+$xlsm = Join-Path $projectDir 'casedesk.xlsm'
 $testMail = Join-Path $mailDir 'mail_test_perf'
 $testCase = Join-Path $caseDir 'R06-PERFTEST'
 
@@ -21,7 +21,7 @@ function Assert($name, $cond) {
     else { Write-Host "  FAIL: $name" -ForegroundColor Red; $script:fail++ }
 }
 
-$sampleXlsx = Join-Path $projectDir 'sample\folio-sample.xlsx'
+$sampleXlsx = Join-Path $projectDir 'sample\casedesk-sample.xlsx'
 
 $excel = New-Object -ComObject Excel.Application
 $excel.Visible = $true; $excel.DisplayAlerts = $false
@@ -33,7 +33,7 @@ try {
     $excel.AutomationSecurity = $prev
 
     $t0 = Get-Date
-    $excel.Run("'folio.xlsm'!FolioMain.Folio_ShowPanel")
+    $excel.Run("'casedesk.xlsm'!CaseDeskMain.CaseDesk_ShowPanel")
 
     # ========== 1. Wait for initial scan ==========
     Write-Host "`n=== 1. Initial Scan ===" -ForegroundColor Cyan
@@ -41,8 +41,8 @@ try {
     for ($i = 0; $i -lt 120; $i++) {
         Start-Sleep -Milliseconds 500
         try {
-            $mc = $excel.Run("'folio.xlsm'!FolioData.GetMailCount")
-            $cc = $excel.Run("'folio.xlsm'!FolioData.GetCaseCount")
+            $mc = $excel.Run("'casedesk.xlsm'!CaseDeskData.GetMailCount")
+            $cc = $excel.Run("'casedesk.xlsm'!CaseDeskData.GetCaseCount")
             if ($mc -gt 0 -and $cc -gt 0) { $done = $true; break }
         } catch {}
     }
@@ -50,8 +50,8 @@ try {
     $scanTime = ($t1 - $t0).TotalSeconds
     Write-Host "  Scan completed in $([math]::Round($scanTime, 1))s"
 
-    $mailCount1 = $excel.Run("'folio.xlsm'!FolioData.GetMailCount")
-    $caseCount1 = $excel.Run("'folio.xlsm'!FolioData.GetCaseCount")
+    $mailCount1 = $excel.Run("'casedesk.xlsm'!CaseDeskData.GetMailCount")
+    $caseCount1 = $excel.Run("'casedesk.xlsm'!CaseDeskData.GetCaseCount")
     Write-Host "  mail=$mailCount1 cases=$caseCount1"
     Assert 'initial scan completed' $done
     Assert 'mail count > 0' ($mailCount1 -gt 0)
@@ -71,8 +71,8 @@ try {
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Milliseconds 1000
         try {
-            $mc2 = $excel.Run("'folio.xlsm'!FolioData.GetMailCount")
-            $cc2 = $excel.Run("'folio.xlsm'!FolioData.GetCaseCount")
+            $mc2 = $excel.Run("'casedesk.xlsm'!CaseDeskData.GetMailCount")
+            $cc2 = $excel.Run("'casedesk.xlsm'!CaseDeskData.GetCaseCount")
             if ($mc2 -gt $mailCount1 -and $cc2 -gt $caseCount1) {
                 $detectTime = $i; $detected = $true; break
             }
@@ -82,8 +82,8 @@ try {
 
     # ========== 4. Verify counts ==========
     Write-Host "`n=== 3. Count Verification ===" -ForegroundColor Cyan
-    $mailCount2 = $excel.Run("'folio.xlsm'!FolioData.GetMailCount")
-    $caseCount2 = $excel.Run("'folio.xlsm'!FolioData.GetCaseCount")
+    $mailCount2 = $excel.Run("'casedesk.xlsm'!CaseDeskData.GetMailCount")
+    $caseCount2 = $excel.Run("'casedesk.xlsm'!CaseDeskData.GetCaseCount")
     Write-Host "  mail: $mailCount1 -> $mailCount2"
     Write-Host "  cases: $caseCount1 -> $caseCount2"
     Assert 'mail count increased' ($mailCount2 -gt $mailCount1)
@@ -98,7 +98,7 @@ try {
     Write-Host "`n=== 5. Timing ===" -ForegroundColor Cyan
     Write-Host "  Initial scan: $([math]::Round($scanTime, 1))s"
     try {
-        $sigSh = $wb.Worksheets.Item("_folio_signal")
+        $sigSh = $wb.Worksheets.Item("_casedesk_signal")
         Write-Host "  BE profile: $($sigSh.Range('C1').Value2)"
         Write-Host "  Signal A1: $($sigSh.Range('A1').Value2)  B1: $($sigSh.Range('B1').Value2)"
     } catch { Write-Host "  (no signal sheet)" }

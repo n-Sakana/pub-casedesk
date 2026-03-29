@@ -4,7 +4,7 @@
 $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectDir = Split-Path -Parent $scriptDir
-$xlsmPath = Join-Path $projectDir 'folio.xlsm'
+$xlsmPath = Join-Path $projectDir 'casedesk.xlsm'
 
 if (-not (Test-Path $xlsmPath)) {
     Write-Host "ERROR: $xlsmPath not found." -ForegroundColor Red
@@ -28,7 +28,7 @@ try {
     }
 
     # Open sample workbook
-    $samplePath = Join-Path $projectDir 'sample\folio-sample.xlsx'
+    $samplePath = Join-Path $projectDir 'sample\casedesk-sample.xlsx'
     if (Test-Path $samplePath) {
         $sampleWb = $excel.Workbooks.Open($samplePath)
         Write-Host "Sample workbook opened." -ForegroundColor Green
@@ -37,7 +37,7 @@ try {
     # --- Inject test module ---
     # Create a temporary test module that calls each procedure with error handling
     # and writes results to a temp file
-    $tempFile = Join-Path $env:TEMP "folio_test_result.txt"
+    $tempFile = Join-Path $env:TEMP "casedesk_test_result.txt"
     if (Test-Path $tempFile) { Remove-Item $tempFile -Force }
 
     $testCode = @"
@@ -48,23 +48,23 @@ Public Sub RunAllTests()
     fnum = FreeFile
     Open "$($tempFile -replace '\\','\\')" For Output As #fnum
 
-    ' --- FolioLib (merged from FolioHelpers + FolioConfig + FolioChangeLog) ---
-    TestCall fnum, "FolioLib.NewDict", ""
-    TestCall fnum, "FolioLib.ParseJson", ""
-    TestCall fnum, "FolioLib.SafeName", ""
-    TestCall fnum, "FolioLib.FileExists", ""
-    TestCall fnum, "FolioLib.FolderExists", ""
-    TestCall fnum, "FolioLib.EnsureConfigSheets", ""
-    TestCall fnum, "FolioLib.EnsureLogSheet", ""
+    ' --- CaseDeskLib (merged from CaseDeskHelpers + CaseDeskConfig + CaseDeskChangeLog) ---
+    TestCall fnum, "CaseDeskLib.NewDict", ""
+    TestCall fnum, "CaseDeskLib.ParseJson", ""
+    TestCall fnum, "CaseDeskLib.SafeName", ""
+    TestCall fnum, "CaseDeskLib.FileExists", ""
+    TestCall fnum, "CaseDeskLib.FolderExists", ""
+    TestCall fnum, "CaseDeskLib.EnsureConfigSheets", ""
+    TestCall fnum, "CaseDeskLib.EnsureLogSheet", ""
 
-    ' --- FolioData ---
-    TestCall fnum, "FolioData.GetWorkbookTableNames", ""
-    TestCall fnum, "FolioData.FindTable", ""
+    ' --- CaseDeskData ---
+    TestCall fnum, "CaseDeskData.GetWorkbookTableNames", ""
+    TestCall fnum, "CaseDeskData.FindTable", ""
 
     ' --- FieldEditor (skip - class, needs form) ---
 
-    ' --- frmFolio (instantiation test) ---
-    TestFormLoad fnum, "frmFolio"
+    ' --- frmCaseDesk (instantiation test) ---
+    TestFormLoad fnum, "frmCaseDesk"
     TestFormLoad fnum, "frmSettings"
 
     Close #fnum
@@ -74,32 +74,32 @@ Private Sub TestCall(fnum As Integer, procName As String, note As String)
     On Error GoTo ErrHandler
     Dim result As String
     Select Case procName
-        Case "FolioLib.NewDict"
-            Dim d As Object: Set d = FolioLib.NewDict()
+        Case "CaseDeskLib.NewDict"
+            Dim d As Object: Set d = CaseDeskLib.NewDict()
             result = "OK (Dict created)"
-        Case "FolioLib.ParseJson"
-            Dim j As Object: Set j = FolioLib.ParseJson("{""a"":1}")
+        Case "CaseDeskLib.ParseJson"
+            Dim j As Object: Set j = CaseDeskLib.ParseJson("{""a"":1}")
             result = "OK (parsed)"
-        Case "FolioLib.SafeName"
-            Dim sn As String: sn = FolioLib.SafeName("test/file:name")
+        Case "CaseDeskLib.SafeName"
+            Dim sn As String: sn = CaseDeskLib.SafeName("test/file:name")
             result = "OK (" & sn & ")"
-        Case "FolioLib.FileExists"
-            Dim fe As Boolean: fe = FolioLib.FileExists("C:\nonexist.txt")
+        Case "CaseDeskLib.FileExists"
+            Dim fe As Boolean: fe = CaseDeskLib.FileExists("C:\nonexist.txt")
             result = "OK (" & fe & ")"
-        Case "FolioLib.FolderExists"
-            Dim fde As Boolean: fde = FolioLib.FolderExists("C:\")
+        Case "CaseDeskLib.FolderExists"
+            Dim fde As Boolean: fde = CaseDeskLib.FolderExists("C:\")
             result = "OK (" & fde & ")"
-        Case "FolioLib.EnsureConfigSheets"
-            FolioLib.EnsureConfigSheets
+        Case "CaseDeskLib.EnsureConfigSheets"
+            CaseDeskLib.EnsureConfigSheets
             result = "OK"
-        Case "FolioLib.EnsureLogSheet"
-            FolioLib.EnsureLogSheet
+        Case "CaseDeskLib.EnsureLogSheet"
+            CaseDeskLib.EnsureLogSheet
             result = "OK"
-        Case "FolioData.GetWorkbookTableNames"
-            Dim tn As Collection: Set tn = FolioData.GetWorkbookTableNames(ActiveWorkbook)
+        Case "CaseDeskData.GetWorkbookTableNames"
+            Dim tn As Collection: Set tn = CaseDeskData.GetWorkbookTableNames(ActiveWorkbook)
             result = "OK (count=" & tn.Count & ")"
-        Case "FolioData.FindTable"
-            Dim tbl As ListObject: Set tbl = FolioData.FindTable(ActiveWorkbook, "anken")
+        Case "CaseDeskData.FindTable"
+            Dim tbl As ListObject: Set tbl = CaseDeskData.FindTable(ActiveWorkbook, "anken")
             If tbl Is Nothing Then result = "OK (not found)" Else result = "OK (found: " & tbl.Name & ")"
         Case Else
             result = "SKIP"
@@ -114,9 +114,9 @@ End Sub
 Private Sub TestFormLoad(fnum As Integer, formName As String)
     On Error GoTo ErrHandler
     Select Case formName
-        Case "frmFolio"
-            Dim f1 As New frmFolio
-            Print #fnum, "PASS | frmFolio.New | OK (instantiated)"
+        Case "frmCaseDesk"
+            Dim f1 As New frmCaseDesk
+            Print #fnum, "PASS | frmCaseDesk.New | OK (instantiated)"
             Unload f1
         Case "frmSettings"
             Dim f2 As New frmSettings
@@ -138,7 +138,7 @@ End Sub
     # Run the test
     Write-Host 'Running tests...' -ForegroundColor Cyan
     try {
-        $excel.Run("'folio.xlsm'!RunAllTests")
+        $excel.Run("'casedesk.xlsm'!RunAllTests")
     } catch {
         Write-Host "Run error: $($_.Exception.Message)" -ForegroundColor Red
         # Try without workbook prefix

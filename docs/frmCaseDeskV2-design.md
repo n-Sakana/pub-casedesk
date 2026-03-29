@@ -1,14 +1,14 @@
-# frmFolioV2 設計構想
+# frmCaseDeskV2 設計構想
 
 ## 方針
 - ウィンドウなしコントロール（Label + TextBox + ScrollBar）のみで構成
 - ListBox / MultiPage / ComboBox / Frame は使わない
 - Z位置・リサイズ・スプリッターが完全に自由
-- 既存 frmFolio はそのまま残す。V2 は別フォームとして並行開発
+- 既存 frmCaseDesk はそのまま残す。V2 は別フォームとして並行開発
 
 ## エントリポイント
-- `Folio_ShowPanel2` → `frmFolioV2.Show vbModeless`
-- 既存の `Folio_ShowPanel` は変更しない
+- `CaseDesk_ShowPanel2` → `frmCaseDeskV2.Show vbModeless`
+- 既存の `CaseDesk_ShowPanel` は変更しない
 
 ## コントロール構成（全て Label / TextBox / ScrollBar）
 
@@ -49,7 +49,7 @@
 2. **Phase 2**: 自前リスト（レコードリスト）+ フィルタ + ソース選択
 3. **Phase 3**: タブ + Detail ページ（FieldEditor 連携）
 4. **Phase 4**: Mail / Files / Log タブ
-5. **Phase 5**: 既存 frmFolio を frmFolioV2 で置き換え
+5. **Phase 5**: 既存 frmCaseDesk を frmCaseDeskV2 で置き換え
 
 ## 懸念事項
 - Label 数が多い（リスト行数 × カラム数）→ パフォーマンス要検証

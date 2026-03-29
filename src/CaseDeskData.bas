@@ -1,9 +1,9 @@
-Attribute VB_Name = "FolioData"
+Attribute VB_Name = "CaseDeskData"
 Option Explicit
 
 ' ============================================================================
-' FE-side cache (populated from hidden sheets written by FolioWorker)
-' FE detects changes via Workbook_SheetChange on _folio_signal.
+' FE-side cache (populated from hidden sheets written by CaseDeskWorker)
+' FE detects changes via Workbook_SheetChange on _casedesk_signal.
 ' ============================================================================
 
 Private m_feMailRecords As Object    ' Dict: entry_id -> record Dict
@@ -16,7 +16,7 @@ Private m_feCaseFiles As Object      ' Dict: case_id -> Dict(file_path -> record
 ' ============================================================================
 
 Public Function GetWorkbookTableNames(wb As Workbook) As Collection
-    Dim eh As New ErrorHandler: eh.Enter "FolioData", "GetWorkbookTableNames"
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskData", "GetWorkbookTableNames"
     On Error GoTo ErrHandler
     Set GetWorkbookTableNames = New Collection
     Dim ws As Worksheet
@@ -33,7 +33,7 @@ ErrHandler: eh.Catch
 End Function
 
 Public Function FindTable(wb As Workbook, tableName As String) As ListObject
-    Dim eh As New ErrorHandler: eh.Enter "FolioData", "FindTable"
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskData", "FindTable"
     On Error GoTo ErrHandler
     Dim ws As Worksheet
     For Each ws In wb.Worksheets
@@ -49,9 +49,9 @@ ErrHandler: eh.Catch
 End Function
 
 Public Function ReadTableRecords(tbl As ListObject) As Object
-    Dim eh As New ErrorHandler: eh.Enter "FolioData", "ReadTableRecords"
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskData", "ReadTableRecords"
     On Error GoTo ErrHandler
-    Set ReadTableRecords = FolioLib.NewDict()
+    Set ReadTableRecords = CaseDeskLib.NewDict()
     If tbl.DataBodyRange Is Nothing Then eh.OK: Exit Function
     Dim data As Variant: data = tbl.DataBodyRange.Value
     Dim nCols As Long: nCols = tbl.ListColumns.Count
@@ -62,7 +62,7 @@ Public Function ReadTableRecords(tbl As ListObject) As Object
     Next c
     Dim r As Long
     For r = 1 To UBound(data, 1)
-        Dim rec As Object: Set rec = FolioLib.NewDict()
+        Dim rec As Object: Set rec = CaseDeskLib.NewDict()
         rec.Add "_row_index", r
         For c = 1 To nCols
             rec.Add colNames(c), data(r, c)
@@ -74,7 +74,7 @@ ErrHandler: eh.Catch
 End Function
 
 Public Sub WriteTableCell(tbl As ListObject, rowIndex As Long, colName As String, val As Variant)
-    Dim eh As New ErrorHandler: eh.Enter "FolioData", "WriteTableCell"
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskData", "WriteTableCell"
     On Error GoTo ErrHandler
     Dim col As ListColumn: Set col = tbl.ListColumns(colName)
     tbl.DataBodyRange.Cells(rowIndex, col.Index).Value = val
@@ -83,7 +83,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Public Function GetTableColumnNames(tbl As ListObject) As Collection
-    Dim eh As New ErrorHandler: eh.Enter "FolioData", "GetTableColumnNames"
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskData", "GetTableColumnNames"
     On Error GoTo ErrHandler
     Set GetTableColumnNames = New Collection
     Dim col As ListColumn
@@ -105,7 +105,7 @@ End Function
 
 ' FE: Find mail records matching keyValue via FE-side Dictionary cache
 Public Function FindMailRecords(keyValue As String, matchField As String, matchMode As String) As Object
-    Dim result As Object: Set result = FolioLib.NewDict()
+    Dim result As Object: Set result = CaseDeskLib.NewDict()
     Set FindMailRecords = result
     If Len(keyValue) = 0 Then Exit Function
     If m_feMailIndex Is Nothing Then Exit Function
@@ -143,13 +143,13 @@ End Function
 
 
 Public Sub CreateCaseFolder(rootPath As String, caseId As String, displayName As String)
-    Dim eh As New ErrorHandler: eh.Enter "FolioData", "CreateCaseFolder"
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskData", "CreateCaseFolder"
     On Error GoTo ErrHandler
     If Len(rootPath) = 0 Or Len(caseId) = 0 Then eh.OK: Exit Sub
     Dim folderName As String
-    folderName = FolioLib.SafeName(caseId)
-    If Len(displayName) > 0 Then folderName = folderName & "_" & FolioLib.SafeName(displayName)
-    FolioLib.EnsureFolder rootPath & "\" & folderName
+    folderName = CaseDeskLib.SafeName(caseId)
+    If Len(displayName) > 0 Then folderName = folderName & "_" & CaseDeskLib.SafeName(displayName)
+    CaseDeskLib.EnsureFolder rootPath & "\" & folderName
     eh.OK: Exit Sub
 ErrHandler: eh.Catch
 End Sub
@@ -164,16 +164,16 @@ Public Sub LoadFromLocalSheets(wb As Workbook)
     On Error Resume Next
     Dim ws As Worksheet
 
-    Set ws = wb.Worksheets("_folio_mail")
+    Set ws = wb.Worksheets("_casedesk_mail")
     If Not ws Is Nothing Then LoadMailFromLocalSheet wb
 
-    Set ws = wb.Worksheets("_folio_mail_idx")
+    Set ws = wb.Worksheets("_casedesk_mail_idx")
     If Not ws Is Nothing Then LoadMailIndexFromLocalSheet wb
 
-    Set ws = wb.Worksheets("_folio_cases")
+    Set ws = wb.Worksheets("_casedesk_cases")
     If Not ws Is Nothing Then LoadCasesFromLocalSheet wb
 
-    Set ws = wb.Worksheets("_folio_files")
+    Set ws = wb.Worksheets("_casedesk_files")
     If Not ws Is Nothing Then LoadCaseFilesFromLocalSheet wb
 
     On Error GoTo 0
@@ -181,16 +181,16 @@ End Sub
 
 Private Sub LoadMailFromLocalSheet(wb As Workbook)
     On Error GoTo ErrOut
-    Dim ws As Worksheet: Set ws = wb.Worksheets("_folio_mail")
+    Dim ws As Worksheet: Set ws = wb.Worksheets("_casedesk_mail")
     If ws.Range("A1").Value = "" Then Exit Sub
     Dim data As Variant: data = ws.UsedRange.Value
     If IsEmpty(data) Then Exit Sub
-    Dim newRecs As Object: Set newRecs = FolioLib.NewDict()
+    Dim newRecs As Object: Set newRecs = CaseDeskLib.NewDict()
     Dim i As Long
     For i = 1 To UBound(data, 1)
         Dim eid As String: eid = CStr(data(i, 1))
         If Len(eid) = 0 Then GoTo NextLMail
-        Dim rec As Object: Set rec = FolioLib.NewDict()
+        Dim rec As Object: Set rec = CaseDeskLib.NewDict()
         rec.Add "entry_id", eid
         rec.Add "sender_email", CStr(data(i, 2))
         rec.Add "sender_name", CStr(data(i, 3))
@@ -199,7 +199,7 @@ Private Sub LoadMailFromLocalSheet(wb As Workbook)
         rec.Add "folder_path", CStr(data(i, 6))
         rec.Add "body_path", CStr(data(i, 7))
         rec.Add "msg_path", CStr(data(i, 8))
-        Dim attDict As Object: Set attDict = FolioLib.NewDict()
+        Dim attDict As Object: Set attDict = CaseDeskLib.NewDict()
         Dim attStr As String: attStr = CStr(data(i, 9))
         If Len(attStr) > 0 Then
             Dim attParts() As String: attParts = Split(attStr, "|")
@@ -213,6 +213,7 @@ Private Sub LoadMailFromLocalSheet(wb As Workbook)
         End If
         rec.Add "attachment_paths", attDict
         rec.Add "_mail_folder", CStr(data(i, 10))
+        If UBound(data, 2) >= 11 Then rec.Add "body_text", CStr(data(i, 11))
         Set newRecs(eid) = rec
 NextLMail:
     Next i
@@ -223,16 +224,16 @@ End Sub
 
 Private Sub LoadMailIndexFromLocalSheet(wb As Workbook)
     On Error GoTo ErrOut
-    Dim ws As Worksheet: Set ws = wb.Worksheets("_folio_mail_idx")
+    Dim ws As Worksheet: Set ws = wb.Worksheets("_casedesk_mail_idx")
     If ws.Range("A1").Value = "" Then Exit Sub
     Dim data As Variant: data = ws.UsedRange.Value
     If IsEmpty(data) Then Exit Sub
-    Dim newIdx As Object: Set newIdx = FolioLib.NewDict()
+    Dim newIdx As Object: Set newIdx = CaseDeskLib.NewDict()
     Dim i As Long
     For i = 1 To UBound(data, 1)
         Dim key As String: key = CStr(data(i, 1))
         If Len(key) = 0 Then GoTo NextLIdx
-        If Not newIdx.Exists(key) Then newIdx.Add key, FolioLib.NewDict()
+        If Not newIdx.Exists(key) Then newIdx.Add key, CaseDeskLib.NewDict()
         Dim inner As Object: Set inner = newIdx(key)
         inner(CStr(data(i, 2))) = True
 NextLIdx:
@@ -244,11 +245,11 @@ End Sub
 
 Private Sub LoadCasesFromLocalSheet(wb As Workbook)
     On Error GoTo ErrOut
-    Dim ws As Worksheet: Set ws = wb.Worksheets("_folio_cases")
+    Dim ws As Worksheet: Set ws = wb.Worksheets("_casedesk_cases")
     If ws.Range("A1").Value = "" Then Exit Sub
     Dim data As Variant: data = ws.UsedRange.Value
     If IsEmpty(data) Then Exit Sub
-    Dim newNames As Object: Set newNames = FolioLib.NewDict()
+    Dim newNames As Object: Set newNames = CaseDeskLib.NewDict()
     Dim i As Long
     For i = 1 To UBound(data, 1)
         Dim nm As String: nm = CStr(data(i, 1))
@@ -259,22 +260,22 @@ Private Sub LoadCasesFromLocalSheet(wb As Workbook)
 ErrOut:
 End Sub
 
-' Load ALL case files into Dict indexed by case_id (from _folio_files sheet)
+' Load ALL case files into Dict indexed by case_id (from _casedesk_files sheet)
 Private Sub LoadCaseFilesFromLocalSheet(wb As Workbook)
     On Error GoTo ErrOut
-    Dim ws As Worksheet: Set ws = wb.Worksheets("_folio_files")
+    Dim ws As Worksheet: Set ws = wb.Worksheets("_casedesk_files")
     If ws.Range("A1").Value = "" Then Exit Sub
     Dim data As Variant: data = ws.UsedRange.Value
     If IsEmpty(data) Then Exit Sub
     If UBound(data, 2) < 7 Then Exit Sub
-    Dim newFiles As Object: Set newFiles = FolioLib.NewDict()
+    Dim newFiles As Object: Set newFiles = CaseDeskLib.NewDict()
     Dim i As Long
     For i = 1 To UBound(data, 1)
         Dim cid As String: cid = CStr(data(i, 1))
         If Len(cid) = 0 Then GoTo NextFile
-        If Not newFiles.Exists(cid) Then newFiles.Add cid, FolioLib.NewDict()
+        If Not newFiles.Exists(cid) Then newFiles.Add cid, CaseDeskLib.NewDict()
         Dim inner As Object: Set inner = newFiles(cid)
-        Dim rec As Object: Set rec = FolioLib.NewDict()
+        Dim rec As Object: Set rec = CaseDeskLib.NewDict()
         rec.Add "case_id", cid
         rec.Add "file_name", CStr(data(i, 2))
         rec.Add "file_path", CStr(data(i, 3))
@@ -292,7 +293,7 @@ End Sub
 
 ' O(1) lookup: get all files for a specific case ID
 Public Function FindCaseFiles(caseId As String) As Object
-    Set FindCaseFiles = FolioLib.NewDict()
+    Set FindCaseFiles = CaseDeskLib.NewDict()
     If m_feCaseFiles Is Nothing Then Exit Function
     If Len(caseId) = 0 Then Exit Function
     ' Prefix match: case folder may be "R06-001" or "R06-001_Name"

@@ -189,24 +189,24 @@ End Function
 Private Sub LoadConfig()
     m_suppressEvents = True
 
-    m_txtExcelPath.Text = FolioLib.GetStr("excel_path")
-    m_txtMailFolder.Text = FolioLib.GetStr("mail_folder")
-    m_txtCaseFolder.Text = FolioLib.GetStr("case_folder_root")
+    m_txtExcelPath.Text = CaseDeskLib.GetStr("excel_path")
+    m_txtMailFolder.Text = CaseDeskLib.GetStr("mail_folder")
+    m_txtCaseFolder.Text = CaseDeskLib.GetStr("case_folder_root")
 
     ' Load tables from Excel path
     If Len(m_txtExcelPath.Text) > 0 Then LoadTables
 
     ' Restore selected source
-    Dim sources As Collection: Set sources = FolioLib.GetSourceNames()
+    Dim sources As Collection: Set sources = CaseDeskLib.GetSourceNames()
     If sources.Count > 0 Then
         SelectComboItem m_cmbTable, CStr(sources(1))
         LoadColumns
         Dim src As String: src = CStr(sources(1))
-        SelectComboItem m_cmbKeyCol, FolioLib.GetSourceStr(src, "key_column")
-        SelectComboItem m_cmbNameCol, FolioLib.GetSourceStr(src, "display_name_column")
-        SelectComboItem m_cmbMailCol, FolioLib.GetSourceStr(src, "mail_link_column")
-        SelectComboItem m_cmbMailMatchMode, FolioLib.GetSourceStr(src, "mail_match_mode", "exact")
-        SelectComboItem m_cmbFolderCol, FolioLib.GetSourceStr(src, "folder_link_column")
+        SelectComboItem m_cmbKeyCol, CaseDeskLib.GetSourceStr(src, "key_column")
+        SelectComboItem m_cmbNameCol, CaseDeskLib.GetSourceStr(src, "display_name_column")
+        SelectComboItem m_cmbMailCol, CaseDeskLib.GetSourceStr(src, "mail_link_column")
+        SelectComboItem m_cmbMailMatchMode, CaseDeskLib.GetSourceStr(src, "mail_match_mode", "exact")
+        SelectComboItem m_cmbFolderCol, CaseDeskLib.GetSourceStr(src, "folder_link_column")
     End If
 
     m_suppressEvents = False
@@ -216,7 +216,7 @@ Private Sub LoadTables()
     m_cmbTable.Clear
     Dim wb As Workbook: Set wb = FindOrOpenWorkbook(m_txtExcelPath.Text)
     If wb Is Nothing Then Exit Sub
-    Dim names As Collection: Set names = FolioData.GetWorkbookTableNames(wb)
+    Dim names As Collection: Set names = CaseDeskData.GetWorkbookTableNames(wb)
     Dim n As Variant
     For Each n In names: m_cmbTable.AddItem CStr(n): Next n
 End Sub
@@ -230,10 +230,10 @@ Private Sub LoadColumns()
 
     Dim wb As Workbook: Set wb = FindOrOpenWorkbook(m_txtExcelPath.Text)
     If wb Is Nothing Then Exit Sub
-    Dim tbl As ListObject: Set tbl = FolioData.FindTable(wb, m_cmbTable.Text)
+    Dim tbl As ListObject: Set tbl = CaseDeskData.FindTable(wb, m_cmbTable.Text)
     If tbl Is Nothing Then Exit Sub
 
-    Dim cols As Collection: Set cols = FolioData.GetTableColumnNames(tbl)
+    Dim cols As Collection: Set cols = CaseDeskData.GetTableColumnNames(tbl)
     Dim c As Variant
     m_cmbKeyCol.AddItem "": m_cmbNameCol.AddItem ""
     m_cmbMailCol.AddItem "": m_cmbFolderCol.AddItem ""
@@ -342,24 +342,24 @@ Private Sub m_cmdSave_Click()
         End If
     End If
 
-    FolioLib.SetStr "excel_path", m_txtExcelPath.Text
-    FolioLib.SetStr "mail_folder", m_txtMailFolder.Text
-    FolioLib.SetStr "case_folder_root", m_txtCaseFolder.Text
+    CaseDeskLib.SetStr "excel_path", m_txtExcelPath.Text
+    CaseDeskLib.SetStr "mail_folder", m_txtMailFolder.Text
+    CaseDeskLib.SetStr "case_folder_root", m_txtCaseFolder.Text
 
     If m_cmbTable.ListIndex >= 0 Then
         Dim src As String: src = m_cmbTable.Text
-        FolioLib.EnsureSource src
-        FolioLib.SetSourceStr src, "key_column", m_cmbKeyCol.Text
-        FolioLib.SetSourceStr src, "display_name_column", m_cmbNameCol.Text
-        If m_cmbMailCol.ListIndex > 0 Then FolioLib.SetSourceStr src, "mail_link_column", m_cmbMailCol.Text
-        FolioLib.SetSourceStr src, "mail_match_mode", m_cmbMailMatchMode.Text
-        If m_cmbFolderCol.ListIndex > 0 Then FolioLib.SetSourceStr src, "folder_link_column", m_cmbFolderCol.Text
+        CaseDeskLib.EnsureSource src
+        CaseDeskLib.SetSourceStr src, "key_column", m_cmbKeyCol.Text
+        CaseDeskLib.SetSourceStr src, "display_name_column", m_cmbNameCol.Text
+        If m_cmbMailCol.ListIndex > 0 Then CaseDeskLib.SetSourceStr src, "mail_link_column", m_cmbMailCol.Text
+        CaseDeskLib.SetSourceStr src, "mail_match_mode", m_cmbMailMatchMode.Text
+        If m_cmbFolderCol.ListIndex > 0 Then CaseDeskLib.SetSourceStr src, "folder_link_column", m_cmbFolderCol.Text
 
         ' Auto-detect field settings from table format
         Dim wb As Workbook: Set wb = FindOrOpenWorkbook(m_txtExcelPath.Text)
         If Not wb Is Nothing Then
-            Dim tbl As ListObject: Set tbl = FolioData.FindTable(wb, src)
-            If Not tbl Is Nothing Then FolioLib.InitFieldSettingsFromTable src, tbl
+            Dim tbl As ListObject: Set tbl = CaseDeskData.FindTable(wb, src)
+            If Not tbl Is Nothing Then CaseDeskLib.InitFieldSettingsFromTable src, tbl
         End If
     End If
 

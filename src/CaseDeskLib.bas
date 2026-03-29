@@ -1,12 +1,12 @@
-Attribute VB_Name = "FolioLib"
+Attribute VB_Name = "CaseDeskLib"
 Option Explicit
 
 ' ============================================================================
-' FolioLib: Merged from FolioHelpers + FolioConfig + FolioChangeLog
+' CaseDeskLib: Merged from CaseDeskHelpers + CaseDeskConfig + CaseDeskChangeLog
 ' ============================================================================
 
 ' ##########################################################################
-' # SECTION: General Utilities (ex-FolioHelpers)
+' # SECTION: General Utilities (ex-CaseDeskHelpers)
 ' ##########################################################################
 
 ' --- Helpers state ---
@@ -14,9 +14,9 @@ Private m_readStm As Object  ' Reusable ADODB.Stream for ReadTextFile
 Private m_writeStm As Object ' Reusable ADODB.Stream for WriteTextFile
 
 ' --- Config state ---
-Private Const SH_CONFIG As String = "_folio_config"
-Private Const SH_SOURCES As String = "_folio_sources"
-Private Const SH_FIELDS As String = "_folio_fields"
+Private Const SH_CONFIG As String = "_casedesk_config"
+Private Const SH_SOURCES As String = "_casedesk_sources"
+Private Const SH_FIELDS As String = "_casedesk_fields"
 Private m_cfg As Object       ' Dict: key -> value
 Private m_sources As Object   ' Dict: source_name -> Dict(col -> value)
 Private m_fields As Object    ' Dict: "source|field" -> Dict(col -> value)
@@ -24,8 +24,8 @@ Private m_loaded As Boolean
 Private m_dirty As Boolean
 
 ' --- ChangeLog state ---
-Private Const LOG_SHEET As String = "_folio_log"
-Private Const LOG_TABLE As String = "FolioLog"
+Private Const LOG_SHEET As String = "_casedesk_log"
+Private Const LOG_TABLE As String = "CaseDeskLog"
 Private Const MAX_LOG_ROWS As Long = 5000
 
 ' ============================================================================
@@ -223,81 +223,6 @@ Public Function JsonEscape(ByVal s As String) As String
 End Function
 
 ' ============================================================================
-' Fast mail meta.json parser (InStr-based, no char-by-char parsing)
-' Expects fixed structure: flat object with "attachments" array of {"path":"..."} objects
-' ============================================================================
-
-Public Function ParseMailMeta(ByVal json As String) As Object
-    Dim d As Object: Set d = NewDict()
-    Set ParseMailMeta = d
-    If Len(json) < 5 Then Exit Function
-
-    ' Extract simple string fields via InStr
-    ExtractField json, d, "mail_id"
-    ExtractField json, d, "entry_id"
-    ExtractField json, d, "mailbox_address"
-    ExtractField json, d, "folder_path"
-    ExtractField json, d, "received_at"
-    ExtractField json, d, "sender_name"
-    ExtractField json, d, "sender_email"
-    ExtractField json, d, "subject"
-    ExtractField json, d, "body_path"
-    ExtractField json, d, "msg_path"
-
-    ' Extract attachments: just collect path strings into a Collection (no Dict per attachment)
-    Dim attStart As Long: attStart = InStr(1, json, """attachments""")
-    If attStart > 0 Then
-        Dim attCol As New Collection
-        Dim searchPos As Long: searchPos = attStart
-        Do
-            Dim pathKey As Long: pathKey = InStr(searchPos, json, """path""")
-            If pathKey = 0 Then Exit Do
-            Dim pathVal As String: pathVal = ExtractValueAt(json, pathKey + 6)
-            If Len(pathVal) > 0 Then attCol.Add pathVal
-            searchPos = pathKey + 6
-        Loop
-        d.Add "attachments", attCol
-    End If
-End Function
-
-Private Sub ExtractField(ByRef json As String, d As Object, fieldName As String)
-    Dim key As String: key = """" & fieldName & """"
-    Dim pos As Long: pos = InStr(1, json, key)
-    If pos = 0 Then Exit Sub
-    ' Skip past key, colon, optional spaces, opening quote
-    Dim valStart As Long: valStart = InStr(pos + Len(key), json, """")
-    If valStart = 0 Then Exit Sub
-    valStart = valStart + 1
-    ' Find closing quote (handle \" escapes)
-    Dim valEnd As Long: valEnd = valStart
-    Do
-        valEnd = InStr(valEnd, json, """")
-        If valEnd = 0 Then Exit Sub
-        ' Check for escape
-        If Mid$(json, valEnd - 1, 1) <> "\" Then Exit Do
-        valEnd = valEnd + 1
-    Loop
-    Dim val As String: val = Mid$(json, valStart, valEnd - valStart)
-    ' Unescape common sequences
-    If InStr(1, val, "\") > 0 Then
-        val = Replace(val, "\""", """")
-        val = Replace(val, "\\", "\")
-        val = Replace(val, "\n", vbLf)
-        val = Replace(val, "\t", vbTab)
-    End If
-    d.Add fieldName, val
-End Sub
-
-Private Function ExtractValueAt(ByRef json As String, startPos As Long) As String
-    Dim valStart As Long: valStart = InStr(startPos, json, """")
-    If valStart = 0 Then Exit Function
-    valStart = valStart + 1
-    Dim valEnd As Long: valEnd = InStr(valStart, json, """")
-    If valEnd = 0 Then Exit Function
-    ExtractValueAt = Mid$(json, valStart, valEnd - valStart)
-End Function
-
-' ============================================================================
 ' Dictionary Helpers
 ' ============================================================================
 
@@ -480,7 +405,7 @@ Public Function CountFieldGroups(fields As Collection) As Long
 End Function
 
 ' ##########################################################################
-' # SECTION: Config Management (ex-FolioConfig)
+' # SECTION: Config Management (ex-CaseDeskConfig)
 ' ##########################################################################
 
 ' ============================================================================
@@ -844,7 +769,7 @@ Private Sub SaveFieldsSheet()
 End Sub
 
 ' ##########################################################################
-' # SECTION: Change Log (ex-FolioChangeLog)
+' # SECTION: Change Log (ex-CaseDeskChangeLog)
 ' ##########################################################################
 
 Private Function GetLogTable() As ListObject
@@ -856,7 +781,7 @@ Private Function GetLogTable() As ListObject
 End Function
 
 Public Sub EnsureLogSheet()
-    Dim eh As New ErrorHandler: eh.Enter "FolioLib", "EnsureLogSheet"
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskLib", "EnsureLogSheet"
     On Error GoTo ErrHandler
     Dim wb As Workbook: Set wb = ThisWorkbook
     Dim ws As Worksheet
@@ -881,7 +806,7 @@ End Sub
 
 Public Sub AddLogEntry(src As String, key As String, field As String, _
                        oldVal As String, newVal As String, origin As String)
-    Dim eh As New ErrorHandler: eh.Enter "FolioLib", "AddLogEntry"
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskLib", "AddLogEntry"
     On Error GoTo ErrHandler
     Dim tbl As ListObject: Set tbl = GetLogTable()
     If tbl Is Nothing Then EnsureLogSheet: Set tbl = GetLogTable()
@@ -954,7 +879,7 @@ Private Sub RotateIfNeeded(tbl As ListObject, addCount As Long)
 End Sub
 
 Public Function GetRecentEntries(Optional count As Long = 200) As Collection
-    Dim eh As New ErrorHandler: eh.Enter "FolioLib", "GetRecentEntries"
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskLib", "GetRecentEntries"
     On Error GoTo ErrHandler
     Set GetRecentEntries = New Collection
     Dim tbl As ListObject: Set tbl = GetLogTable()
@@ -984,7 +909,7 @@ ErrHandler: eh.Catch
 End Function
 
 Public Sub ClearLog()
-    Dim eh As New ErrorHandler: eh.Enter "FolioLib", "ClearLog"
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskLib", "ClearLog"
     On Error GoTo ErrHandler
     Dim tbl As ListObject: Set tbl = GetLogTable()
     If tbl Is Nothing Then Exit Sub

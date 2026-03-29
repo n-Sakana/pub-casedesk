@@ -11,7 +11,7 @@ Option Explicit
 
 Private WithEvents m_ws As Excel.Worksheet
 Private m_tableName As String
-Private m_callback As Object  ' frmFolio
+Private m_callback As Object  ' frmCaseDesk
 
 Public Sub Watch(ws As Excel.Worksheet, tableName As String, callback As Object)
     Set m_ws = ws

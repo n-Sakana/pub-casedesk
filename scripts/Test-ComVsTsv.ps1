@@ -5,7 +5,7 @@
 $ErrorActionPreference = 'Stop'
 
 $projectDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$tsvPath = Join-Path $projectDir '.folio_cache\_bench.tsv'
+$tsvPath = Join-Path $projectDir '.casedesk_cache\_bench.tsv'
 
 $ROWS = 2000
 $COLS = 10

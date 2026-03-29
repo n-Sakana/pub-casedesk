@@ -1,4 +1,4 @@
-﻿# Build-Sample.ps1
+# Build-Sample.ps1
 # サンプルデータ（Excel台帳 + メールアーカイブ + 案件フォルダ）を自動生成する
 #
 # 使い方:
@@ -128,7 +128,7 @@ try {
 
     # Save
     if (-not (Test-Path $sampleOut)) { New-Item -ItemType Directory -Path $sampleOut -Force | Out-Null }
-    $outPath = Join-Path $sampleOut 'folio-sample.xlsx'
+    $outPath = Join-Path $sampleOut 'casedesk-sample.xlsx'
     if (Test-Path $outPath) { Remove-Item $outPath -Force }
     $wb.SaveAs($outPath, 51)
 
@@ -259,6 +259,6 @@ Write-Host "  cases: $Count folders created" -ForegroundColor Green
 
 Write-Host ''
 Write-Host 'Sample data ready!' -ForegroundColor Green
-Write-Host "  Workbook: sample\folio-sample.xlsx ($Count rows, 1 table)"
+Write-Host "  Workbook: sample\casedesk-sample.xlsx ($Count rows, 1 table)"
 Write-Host "  Mail:     sample\mail\ ($mailNum folders)"
 Write-Host "  Cases:    sample\cases\ ($Count folders)"

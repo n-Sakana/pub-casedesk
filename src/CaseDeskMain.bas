@@ -1,4 +1,4 @@
-Attribute VB_Name = "FolioMain"
+Attribute VB_Name = "CaseDeskMain"
 Option Explicit
 
 Public g_forceClose As Boolean
@@ -8,23 +8,23 @@ Public g_workerWb As Object
 
 ' --- Entry Points ---
 
-Public Sub Folio_ShowPanel()
-    Dim eh As New ErrorHandler: eh.Enter "FolioMain", "ShowPanel"
+Public Sub CaseDesk_ShowPanel()
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskMain", "ShowPanel"
     On Error GoTo ErrHandler
-    FolioLib.EnsureConfigSheets
-    FolioLib.EnsureLogSheet
-    EnsureFolioSheets
+    CaseDeskLib.EnsureConfigSheets
+    CaseDeskLib.EnsureLogSheet
+    EnsureCaseDeskSheets
     g_forceClose = False
     g_formLoaded = True
-    frmFolio.Show vbModeless
+    frmCaseDesk.Show vbModeless
     eh.OK
     Exit Sub
 ErrHandler:
     eh.Catch
 End Sub
 
-Public Sub Folio_ShowSettings()
-    Dim eh As New ErrorHandler: eh.Enter "FolioMain", "ShowSettings"
+Public Sub CaseDesk_ShowSettings()
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskMain", "ShowSettings"
     On Error GoTo ErrHandler
     frmSettings.Show vbModal
     eh.OK
@@ -37,7 +37,7 @@ End Sub
 
 Public Sub DeferredStartup()
     On Error Resume Next
-    If g_formLoaded Then frmFolio.DoPollCycle
+    If g_formLoaded Then frmCaseDesk.DoPollCycle
     On Error GoTo 0
 End Sub
 
@@ -47,19 +47,19 @@ Public Sub BeforeWorkbookClose()
     g_forceClose = True
     g_formLoaded = False
     StopWorker
-    FolioLib.SaveToSheets
+    CaseDeskLib.SaveToSheets
 End Sub
 
 ' --- FE Data Sheets ---
 
-Private Sub EnsureFolioSheets()
+Private Sub EnsureCaseDeskSheets()
     Dim wb As Workbook: Set wb = ThisWorkbook
-    EnsureHiddenSheet wb, "_folio_signal"
-    EnsureHiddenSheet wb, "_folio_mail"
-    EnsureHiddenSheet wb, "_folio_mail_idx"
-    EnsureHiddenSheet wb, "_folio_cases"
-    EnsureHiddenSheet wb, "_folio_files"
-    EnsureHiddenSheet wb, "_folio_diff"
+    EnsureHiddenSheet wb, "_casedesk_signal"
+    EnsureHiddenSheet wb, "_casedesk_mail"
+    EnsureHiddenSheet wb, "_casedesk_mail_idx"
+    EnsureHiddenSheet wb, "_casedesk_cases"
+    EnsureHiddenSheet wb, "_casedesk_files"
+    EnsureHiddenSheet wb, "_casedesk_diff"
 End Sub
 
 Private Sub EnsureHiddenSheet(wb As Workbook, shName As String)
@@ -77,7 +77,7 @@ End Sub
 
 Public Sub StartWorker(mailFolder As String, caseRoot As String, _
                        matchField As String, matchMode As String)
-    Dim eh As New ErrorHandler: eh.Enter "FolioMain", "StartWorker"
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskMain", "StartWorker"
     On Error GoTo ErrHandler
 
     If Not g_workerApp Is Nothing Then eh.OK: Exit Sub
@@ -96,7 +96,7 @@ Public Sub StartWorker(mailFolder As String, caseRoot As String, _
     g_workerApp.AutomationSecurity = prevSec
     Set g_workerWb = g_workerApp.Workbooks(g_workerApp.Workbooks.Count)
 
-    g_workerApp.Run "FolioWorker.WorkerEntryPoint", mailFolder, caseRoot, matchField, matchMode, ThisWorkbook
+    g_workerApp.Run "CaseDeskWorker.WorkerEntryPoint", mailFolder, caseRoot, matchField, matchMode, ThisWorkbook
 
     WriteWorkerPid beforePids
 
@@ -123,7 +123,7 @@ End Sub
 ' --- PID Management ---
 
 Private Function GetWorkerPidPath() As String
-    GetWorkerPidPath = ThisWorkbook.path & "\.folio_cache\_worker.pid"
+    GetWorkerPidPath = ThisWorkbook.path & "\.casedesk_cache\_worker.pid"
 End Function
 
 Private Sub WriteWorkerPid(beforePids As Object)
@@ -137,7 +137,7 @@ Private Sub WriteWorkerPid(beforePids As Object)
         If Not beforePids.Exists(k) Then pid = CLng(k): Exit For
     Next k
     If pid = 0 Then Exit Sub
-    FolioLib.EnsureFolder ThisWorkbook.path & "\.folio_cache"
+    CaseDeskLib.EnsureFolder ThisWorkbook.path & "\.casedesk_cache"
     Dim pidPath As String: pidPath = GetWorkerPidPath()
     Dim f As Long: f = FreeFile
     Open pidPath For Output As #f

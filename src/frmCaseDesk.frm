@@ -1,13 +1,13 @@
 VERSION 5.00
-Begin {C62A69F0-16DC-11CE-9E0D-00AA006002F3} frmFolio
-   Caption         =   "folio"
+Begin {C62A69F0-16DC-11CE-9E0D-00AA006002F3} frmCaseDesk
+   Caption         =   "CaseDesk"
    ClientHeight    =   8100
    ClientLeft      =   120
    ClientTop       =   465
    ClientWidth     =   13050
    StartUpPosition =   2  'CenterScreen
 End
-Attribute VB_Name = "frmFolio"
+Attribute VB_Name = "frmCaseDesk"
 Attribute VB_GlobalNameSpace = False
 Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
@@ -95,22 +95,22 @@ Private Const SIZE_MAX_H As Long = 900
 ' ============================================================================
 
 Private Sub UserForm_Initialize()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "Initialize"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "Initialize"
     On Error GoTo ErrHandler
     Set m_filteredRows = New Collection
     Set m_fieldEditors = New Collection
-    Set m_matchedMails = FolioLib.NewDict()
+    Set m_matchedMails = CaseDeskLib.NewDict()
     Set m_fileTreeItems = New Collection
     Set m_undoStack = New Collection
     m_currentRecIdx = -1
 
-    m_leftW = FolioLib.GetLng("left_width", 250)
-    m_rightW = FolioLib.GetLng("right_width", 250)
+    m_leftW = CaseDeskLib.GetLng("left_width", 250)
+    m_rightW = CaseDeskLib.GetLng("right_width", 250)
     m_leftVisible = True
     m_rightVisible = True
-    m_fontSize = FolioLib.GetLng("font_size", 10)
-    Me.Width = FolioLib.GetLng("window_width", 870)
-    Me.Height = FolioLib.GetLng("window_height", 540)
+    m_fontSize = CaseDeskLib.GetLng("font_size", 10)
+    Me.Width = CaseDeskLib.GetLng("window_width", 870)
+    Me.Height = CaseDeskLib.GetLng("window_height", 540)
 
     m_loading = True
     eh.Trace "BuildLayout"
@@ -119,20 +119,20 @@ Private Sub UserForm_Initialize()
     eh.Trace "LoadSources"
     LoadSources
 
-    Dim selSrc As String: selSrc = FolioLib.GetStr("selected_source")
+    Dim selSrc As String: selSrc = CaseDeskLib.GetStr("selected_source")
     If Len(selSrc) > 0 Then
         Dim si As Long
         For si = 0 To m_cmbSource.ListCount - 1
             If m_cmbSource.List(si) = selSrc Then m_cmbSource.ListIndex = si: Exit For
         Next si
     End If
-    m_txtFilter.Text = FolioLib.GetStr("search_text")
+    m_txtFilter.Text = CaseDeskLib.GetStr("search_text")
 
     m_lastWidth = Me.Width: m_lastHeight = Me.Height
     m_loading = False
     RepositionControls
     ' Deferred worker startup (after UI is visible)
-    Application.OnTime Now, "FolioMain.DeferredStartup"
+    Application.OnTime Now, "CaseDeskMain.DeferredStartup"
     eh.OK: Exit Sub
 ErrHandler: eh.Catch
 End Sub
@@ -142,9 +142,9 @@ End Sub
 ' ============================================================================
 
 Private Sub BuildLayout()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "BuildLayout"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "BuildLayout"
     On Error GoTo ErrHandler
-    Me.Caption = "folio"
+    Me.Caption = "CaseDesk"
     Me.BackColor = &HFFFFFF
 
     Dim cw As Single: cw = Me.InsideWidth
@@ -341,7 +341,7 @@ Private Sub m_resizeHandle_MouseUp(ByVal Button As Integer, ByVal Shift As Integ
 End Sub
 
 Private Sub RepositionControls()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "RepositionControls"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "RepositionControls"
     On Error GoTo ErrHandler
     Dim cw As Single: cw = Me.InsideWidth
     Dim ch As Single: ch = Me.InsideHeight
@@ -551,12 +551,12 @@ End Function
 ' ============================================================================
 
 Private Sub LoadSources()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "LoadSources"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "LoadSources"
     On Error GoTo ErrHandler
     m_cmbSource.Clear
     Dim wb As Workbook: Set wb = GetDataWorkbook()
     If Not wb Is Nothing Then
-        Dim names As Collection: Set names = FolioData.GetWorkbookTableNames(wb)
+        Dim names As Collection: Set names = CaseDeskData.GetWorkbookTableNames(wb)
         Dim n As Variant
         For Each n In names
             m_cmbSource.AddItem CStr(n)
@@ -568,7 +568,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Function GetDataWorkbook() As Workbook
-    Dim excelPath As String: excelPath = FolioLib.GetStr("excel_path")
+    Dim excelPath As String: excelPath = CaseDeskLib.GetStr("excel_path")
     If Len(excelPath) = 0 Then Exit Function
     If Dir$(excelPath) = "" Then Exit Function
 
@@ -588,12 +588,12 @@ Private Function GetDataWorkbook() As Workbook
 End Function
 
 Private Sub SwitchSource(sourceName As String)
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "SwitchSource"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "SwitchSource"
     On Error GoTo ErrHandler
     m_loading = True
 
     m_currentSource = sourceName
-    Set m_currentTable = FolioData.FindTable(GetDataWorkbook(), sourceName)
+    Set m_currentTable = CaseDeskData.FindTable(GetDataWorkbook(), sourceName)
     If m_currentTable Is Nothing Then m_loading = False: Exit Sub
 
     ' Watch table sheet for immediate change detection
@@ -601,15 +601,15 @@ Private Sub SwitchSource(sourceName As String)
     Set m_watcher = New SheetWatcher
     m_watcher.Watch m_currentTable.Parent, sourceName, Me
 
-    FolioLib.EnsureSource sourceName
-    FolioLib.InitFieldSettingsFromTable sourceName, m_currentTable
+    CaseDeskLib.EnsureSource sourceName
+    CaseDeskLib.InitFieldSettingsFromTable sourceName, m_currentTable
 
     ' Mail / Case config
-    Dim mailFolder As String: mailFolder = FolioLib.GetStr("mail_folder")
-    Dim caseRoot As String: caseRoot = FolioLib.GetStr("case_folder_root")
-    Dim mailMatchField As String: mailMatchField = FolioLib.GetSourceStr(sourceName, "mail_match_field")
+    Dim mailFolder As String: mailFolder = CaseDeskLib.GetStr("mail_folder")
+    Dim caseRoot As String: caseRoot = CaseDeskLib.GetStr("case_folder_root")
+    Dim mailMatchField As String: mailMatchField = CaseDeskLib.GetSourceStr(sourceName, "mail_match_field")
     If Len(mailMatchField) = 0 Then mailMatchField = "sender_email"
-    Dim mailMatchMode As String: mailMatchMode = FolioLib.GetSourceStr(sourceName, "mail_match_mode", "exact")
+    Dim mailMatchMode As String: mailMatchMode = CaseDeskLib.GetSourceStr(sourceName, "mail_match_mode", "exact")
 
     ' Worker startup deferred — starts after UI is visible
     m_workerPending = True
@@ -637,7 +637,7 @@ End Sub
 ' ============================================================================
 
 Private Sub BuildFieldEditors()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "BuildFieldEditors"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "BuildFieldEditors"
     On Error GoTo ErrHandler
     Set m_fieldEditors = New Collection
     Dim pg As MSForms.Page: Set pg = m_mpgTabs.Pages(0)
@@ -649,10 +649,10 @@ Private Sub BuildFieldEditors()
     m_fieldGroupPageCount = 0
 
     If m_currentTable Is Nothing Then Exit Sub
-    Dim fields As Collection: Set fields = FolioLib.GetFieldNames(m_currentSource)
+    Dim fields As Collection: Set fields = CaseDeskLib.GetFieldNames(m_currentSource)
     If fields.Count = 0 Then Exit Sub
 
-    Dim keyCol As String: keyCol = FolioLib.GetSourceStr(m_currentSource, "key_column")
+    Dim keyCol As String: keyCol = CaseDeskLib.GetSourceStr(m_currentSource, "key_column")
     Dim hasGroups As Boolean: hasGroups = (CountFieldGroups(fields) >= 2)
 
     If Not hasGroups Then
@@ -696,7 +696,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Sub AddFieldEditorsToPage(pg As MSForms.Page, fields As Collection, keyCol As String)
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "AddFieldEditorsToPage"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "AddFieldEditorsToPage"
     On Error GoTo ErrHandler
     Dim pw As Single: pw = m_mpgTabs.Width - 16
     Dim ph As Single: ph = m_mpgTabs.Height - 36
@@ -722,8 +722,8 @@ Private Sub AddFieldEditorsToPage(pg As MSForms.Page, fields As Collection, keyC
         Dim fn As String: fn = CStr(fields(i))
         ' Skip fields ending with "_非表示"
         If Right$(fn, Len(HIDE_SUFFIX)) = HIDE_SUFFIX Then GoTo NextField
-        Dim isMultiline As Boolean: isMultiline = FolioLib.GetFieldBool(m_currentSource, fn, "multiline")
-        Dim isEditable As Boolean: isEditable = FolioLib.GetFieldBool(m_currentSource, fn, "editable", True)
+        Dim isMultiline As Boolean: isMultiline = CaseDeskLib.GetFieldBool(m_currentSource, fn, "multiline")
+        Dim isEditable As Boolean: isEditable = CaseDeskLib.GetFieldBool(m_currentSource, fn, "editable", True)
         If fn = keyCol Then isEditable = False
 
         Dim lbl As MSForms.Label
@@ -734,7 +734,7 @@ Private Sub AddFieldEditorsToPage(pg As MSForms.Page, fields As Collection, keyC
         lbl.Font.Name = "Meiryo UI": lbl.Font.Size = 8
         lbl.ForeColor = RGB(100, 100, 100)
 
-        Dim fType As String: fType = FolioLib.GetFieldStr(m_currentSource, fn, "type", "text")
+        Dim fType As String: fType = CaseDeskLib.GetFieldStr(m_currentSource, fn, "type", "text")
         Dim isNumber As Boolean: isNumber = (fType = "number")
         Dim txtW As Single: txtW = IIf(isNumber, 120, editorW)
         Dim rowH As Single: rowH = IIf(isMultiline, 54, 22)
@@ -770,7 +770,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Sub ClearPageControls(pg As MSForms.Page)
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "ClearPageControls"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "ClearPageControls"
     On Error GoTo ErrHandler
     Do While pg.Controls.Count > 0
         pg.Controls.Remove 0
@@ -784,12 +784,12 @@ End Sub
 ' ============================================================================
 
 Private Sub BuildJoinedTabs()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "BuildJoinedTabs"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "BuildJoinedTabs"
     On Error GoTo ErrHandler
     m_mailPageIdx = -1: m_filesPageIdx = -1
 
     ' DEBUG: show conditions in status bar
-    If Len(FolioLib.GetSourceStr(m_currentSource, "mail_link_column")) > 0 And FolioData.GetMailCount() > 0 Then
+    If Len(CaseDeskLib.GetSourceStr(m_currentSource, "mail_link_column")) > 0 And CaseDeskData.GetMailCount() > 0 Then
         m_mpgTabs.Pages.Add
         m_mailPageIdx = m_mpgTabs.Pages.Count - 1
         Dim pgMail As MSForms.Page: Set pgMail = m_mpgTabs.Pages(m_mailPageIdx)
@@ -797,7 +797,7 @@ Private Sub BuildJoinedTabs()
         BuildMailPage pgMail
     End If
 
-    If Len(FolioLib.GetSourceStr(m_currentSource, "folder_link_column")) > 0 And FolioData.GetCaseCount() > 0 Then
+    If Len(CaseDeskLib.GetSourceStr(m_currentSource, "folder_link_column")) > 0 And CaseDeskData.GetCaseCount() > 0 Then
         m_mpgTabs.Pages.Add
         m_filesPageIdx = m_mpgTabs.Pages.Count - 1
         Dim pgFiles As MSForms.Page: Set pgFiles = m_mpgTabs.Pages(m_filesPageIdx)
@@ -809,7 +809,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Sub BuildMailPage(pg As MSForms.Page)
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "BuildMailPage"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "BuildMailPage"
     On Error GoTo ErrHandler
     Dim pw As Single: pw = m_mpgTabs.Width - 12
     Dim ph As Single: ph = m_mpgTabs.Height - 30
@@ -872,7 +872,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Sub BuildFilesPage(pg As MSForms.Page)
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "BuildFilesPage"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "BuildFilesPage"
     On Error GoTo ErrHandler
     Dim pw As Single: pw = m_mpgTabs.Width - 12
     Dim ph As Single: ph = m_mpgTabs.Height - 30
@@ -903,7 +903,7 @@ End Function
 ' ============================================================================
 
 Private Sub UpdateRecordList()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "UpdateRecordList"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "UpdateRecordList"
     On Error GoTo ErrHandler
     m_lstRecords.Clear
     Set m_filteredRows = New Collection
@@ -911,8 +911,8 @@ Private Sub UpdateRecordList()
     If rowCount = 0 Then Exit Sub
 
     Dim dispCols As New Collection
-    Dim keyCol As String: keyCol = FolioLib.GetSourceStr(m_currentSource, "key_column")
-    Dim nameCol As String: nameCol = FolioLib.GetSourceStr(m_currentSource, "display_name_column")
+    Dim keyCol As String: keyCol = CaseDeskLib.GetSourceStr(m_currentSource, "key_column")
+    Dim nameCol As String: nameCol = CaseDeskLib.GetSourceStr(m_currentSource, "display_name_column")
     If Len(keyCol) > 0 Then dispCols.Add keyCol
     If Len(nameCol) > 0 And nameCol <> keyCol Then dispCols.Add nameCol
 
@@ -935,7 +935,7 @@ Private Sub UpdateRecordList()
         Dim ci As Long
         For ci = 1 To dispCols.Count
             Dim cn As String: cn = CStr(dispCols(ci))
-            Dim fType As String: fType = FolioLib.GetFieldStr(m_currentSource, cn, "type", "text")
+            Dim fType As String: fType = CaseDeskLib.GetFieldStr(m_currentSource, cn, "type", "text")
             Dim cv As Variant: cv = TableCellValue(r, cn)
             If Len(label) > 0 Then label = label & " | "
             label = label & FormatFieldValue(cv, fType)
@@ -966,7 +966,7 @@ End Sub
 
 Private Sub UpdateDetail()
     CommitPendingEdits
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "UpdateDetail"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "UpdateDetail"
     On Error GoTo ErrHandler
     If m_currentSource = "" Then Exit Sub
     Dim idx As Long: idx = m_lstRecords.ListIndex
@@ -987,7 +987,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Sub FillFieldEditors()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "FillFieldEditors"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "FillFieldEditors"
     On Error GoTo ErrHandler
     m_loading = True
     Dim i As Long
@@ -1003,7 +1003,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Sub ClearFieldEditors()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "ClearFieldEditors"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "ClearFieldEditors"
     On Error GoTo ErrHandler
     m_loading = True
     Dim i As Long
@@ -1021,7 +1021,7 @@ End Sub
 ' ============================================================================
 
 Private Sub UpdateMailTab()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "UpdateMailTab"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "UpdateMailTab"
     On Error GoTo ErrHandler
     If m_mailPageIdx < 0 Then Exit Sub
     If m_lstMail Is Nothing Then Exit Sub
@@ -1030,7 +1030,7 @@ Private Sub UpdateMailTab()
     m_txtMailBody.Text = "": m_lstAttach.Clear
 
     If m_currentRecIdx < 1 Then Exit Sub
-    Dim linkCol As String: linkCol = FolioLib.GetSourceStr(m_currentSource, "mail_link_column")
+    Dim linkCol As String: linkCol = CaseDeskLib.GetSourceStr(m_currentSource, "mail_link_column")
     If Len(linkCol) = 0 Then Exit Sub
 
     Dim linkVar As Variant: linkVar = TableCellValue(m_currentRecIdx, linkCol)
@@ -1038,10 +1038,10 @@ Private Sub UpdateMailTab()
     If Not IsNull(linkVar) And Not IsEmpty(linkVar) Then linkVal = CStr(linkVar)
     If Len(linkVal) = 0 Then Exit Sub
 
-    Dim mailMatchField As String: mailMatchField = FolioLib.GetSourceStr(m_currentSource, "mail_match_field")
+    Dim mailMatchField As String: mailMatchField = CaseDeskLib.GetSourceStr(m_currentSource, "mail_match_field")
     If Len(mailMatchField) = 0 Then mailMatchField = "sender_email"
-    Dim mailMatchMode As String: mailMatchMode = FolioLib.GetSourceStr(m_currentSource, "mail_match_mode", "exact")
-    Set m_matchedMails = FolioData.FindMailRecords(linkVal, mailMatchField, mailMatchMode)
+    Dim mailMatchMode As String: mailMatchMode = CaseDeskLib.GetSourceStr(m_currentSource, "mail_match_mode", "exact")
+    Set m_matchedMails = CaseDeskData.FindMailRecords(linkVal, mailMatchField, mailMatchMode)
     If m_matchedMails.Count > 0 Then m_matchedMailArr = m_matchedMails.Items
 
     Dim i As Long
@@ -1063,7 +1063,7 @@ End Sub
 ' ============================================================================
 
 Private Sub UpdateFilesTab()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "UpdateFilesTab"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "UpdateFilesTab"
     On Error GoTo ErrHandler
     If m_filesPageIdx < 0 Then Exit Sub
     If m_lstFiles Is Nothing Then Exit Sub
@@ -1071,7 +1071,7 @@ Private Sub UpdateFilesTab()
     Set m_fileTreeItems = New Collection
 
     If m_currentRecIdx < 1 Then m_mpgTabs.Pages(m_filesPageIdx).Caption = "Files (0)": Exit Sub
-    Dim linkCol As String: linkCol = FolioLib.GetSourceStr(m_currentSource, "folder_link_column")
+    Dim linkCol As String: linkCol = CaseDeskLib.GetSourceStr(m_currentSource, "folder_link_column")
     If Len(linkCol) = 0 Then Exit Sub
 
     Dim linkVar As Variant: linkVar = TableCellValue(m_currentRecIdx, linkCol)
@@ -1080,8 +1080,8 @@ Private Sub UpdateFilesTab()
     If Len(linkVal) = 0 Then Exit Sub
 
     ' Read from FE-side cache (populated by BE's background scan loop)
-    Dim caseRoot As String: caseRoot = FolioLib.GetStr("case_folder_root")
-    Dim matched As Object: Set matched = FolioData.FindCaseFiles(linkVal)
+    Dim caseRoot As String: caseRoot = CaseDeskLib.GetStr("case_folder_root")
+    Dim matched As Object: Set matched = CaseDeskData.FindCaseFiles(linkVal)
 
     ' Build tree: group by folder_path, show folder nodes then files
     Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
@@ -1222,25 +1222,25 @@ Public Sub OnFieldEdited(fieldName As String, newVal As String)
     ' Called on every keystroke — write to table only, no logging
     If m_loading Then Exit Sub
     If m_currentRecIdx > 0 Then
-        FolioData.WriteTableCell m_currentTable, m_currentRecIdx, fieldName, newVal
+        CaseDeskData.WriteTableCell m_currentTable, m_currentRecIdx, fieldName, newVal
     End If
 End Sub
 
 Public Sub OnFieldChanged(fieldName As String, oldVal As String, newVal As String, origin As String)
     ' Called once per edit session (on blur for local, on refresh for external)
     If m_loading Then Exit Sub
-    Dim keyCol As String: keyCol = FolioLib.GetSourceStr(m_currentSource, "key_column")
+    Dim keyCol As String: keyCol = CaseDeskLib.GetSourceStr(m_currentSource, "key_column")
     Dim keyVal As String
     Dim kv As Variant: kv = TableCellValue(m_currentRecIdx, keyCol)
     If Not IsNull(kv) And Not IsEmpty(kv) Then keyVal = CStr(kv)
-    FolioLib.AddLogEntry m_currentSource, keyVal, fieldName, oldVal, newVal, origin
+    CaseDeskLib.AddLogEntry m_currentSource, keyVal, fieldName, oldVal, newVal, origin
     AddLogLine m_currentSource, keyVal, fieldName, oldVal, newVal, origin
     If origin = "local" Then PushUndo m_currentSource, keyVal, fieldName, oldVal, newVal
     m_lblStatus.Caption = "  " & origin & ": " & fieldName & " @ " & Format$(Now, "hh:nn:ss")
 End Sub
 
 Private Sub PushUndo(src As String, key As String, field As String, oldVal As String, newVal As String)
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "PushUndo"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "PushUndo"
     On Error GoTo ErrHandler
     Dim entry As Object: Set entry = NewDict()
     entry.Add "source", src
@@ -1255,7 +1255,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Sub InvokeUndo()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "InvokeUndo"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "InvokeUndo"
     On Error GoTo ErrHandler
     If m_undoStack.Count = 0 Then m_lblStatus.Caption = "  Nothing to undo.": Exit Sub
     Dim entry As Object: Set entry = m_undoStack(m_undoStack.Count)
@@ -1271,7 +1271,7 @@ Private Sub InvokeUndo()
     If m_currentTable Is Nothing Then Exit Sub
 
     ' ControlSource binds TextBox to cell, so writing to cell auto-updates TextBox
-    If m_currentRecIdx > 0 Then FolioData.WriteTableCell m_currentTable, m_currentRecIdx, field, oldVal
+    If m_currentRecIdx > 0 Then CaseDeskData.WriteTableCell m_currentTable, m_currentRecIdx, field, oldVal
     ' ChangeEvent in FieldEditor will log this automatically
     m_lblStatus.Caption = "  Undone: " & field
     eh.OK: Exit Sub
@@ -1283,24 +1283,24 @@ End Sub
 ' ============================================================================
 
 Private Sub LoadChangeLog()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "LoadChangeLog"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "LoadChangeLog"
     On Error GoTo ErrHandler
     m_lstLog.Clear
-    Dim entries As Collection: Set entries = FolioLib.GetRecentEntries(200)
+    Dim entries As Collection: Set entries = CaseDeskLib.GetRecentEntries(200)
     Dim i As Long
     For i = 1 To entries.Count
-        m_lstLog.AddItem FolioLib.FormatLogLine(entries(i))
+        m_lstLog.AddItem CaseDeskLib.FormatLogLine(entries(i))
     Next i
     eh.OK: Exit Sub
 ErrHandler: eh.Catch
 End Sub
 
 Private Sub AddLogLine(src As String, key As String, field As String, oldVal As String, newVal As String, origin As String)
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "AddLogLine"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "AddLogLine"
     On Error GoTo ErrHandler
     Dim recName As String
     If m_currentRecIdx > 0 Then
-        Dim nameCol As String: nameCol = FolioLib.GetSourceStr(m_currentSource, "display_name_column")
+        Dim nameCol As String: nameCol = CaseDeskLib.GetSourceStr(m_currentSource, "display_name_column")
         If Len(nameCol) > 0 Then
             Dim nv As Variant: nv = TableCellValue(m_currentRecIdx, nameCol)
             If Not IsNull(nv) And Not IsEmpty(nv) Then recName = CStr(nv)
@@ -1315,7 +1315,7 @@ Private Sub AddLogLine(src As String, key As String, field As String, oldVal As 
     entry.Add "old", oldVal
     entry.Add "new", newVal
     entry.Add "origin", origin
-    Dim line As String: line = FolioLib.FormatLogLine(entry)
+    Dim line As String: line = CaseDeskLib.FormatLogLine(entry)
     If m_lstLog.ListCount > 0 Then
         m_lstLog.AddItem line, 0
     Else
@@ -1342,12 +1342,12 @@ End Sub
 ' All reads are LOCAL (no cross-process). Returns fast.
 ' ============================================================================
 
-Public Sub OnFolioSheetChange(sheetName As String)
+Public Sub OnCaseDeskSheetChange(sheetName As String)
     On Error Resume Next
     Select Case sheetName
-        Case "_folio_signal"
+        Case "_casedesk_signal"
             ' Version from local sheet
-            Dim sigSh As Worksheet: Set sigSh = ThisWorkbook.Worksheets("_folio_signal")
+            Dim sigSh As Worksheet: Set sigSh = ThisWorkbook.Worksheets("_casedesk_signal")
             Dim ver As Long: ver = 0
             On Error Resume Next: ver = CLng(sigSh.Range("B1").Value): On Error GoTo 0
             If ver > 0 And ver <> m_workerLastVersion Then
@@ -1355,11 +1355,11 @@ Public Sub OnFolioSheetChange(sheetName As String)
                 LoadDataFromLocalSheets
             End If
 
-        Case "_folio_diff"
+        Case "_casedesk_diff"
             ' Diff log from local sheet
             LogDiffsFromSheet
 
-        Case "_folio_files"
+        Case "_casedesk_files"
             ' Now handled synchronously in UpdateFilesTab; ignore async SheetChange
     End Select
     On Error GoTo 0
@@ -1367,7 +1367,7 @@ End Sub
 
 Private Sub LoadDataFromLocalSheets()
     On Error Resume Next
-    FolioData.LoadFromLocalSheets ThisWorkbook
+    CaseDeskData.LoadFromLocalSheets ThisWorkbook
 
     If Not m_workerReady Then
         m_workerReady = True
@@ -1376,7 +1376,7 @@ Private Sub LoadDataFromLocalSheets()
 
     If Not m_lblStatus Is Nothing Then
         m_lblStatus.Caption = "  Active (v" & m_workerLastVersion & _
-            " mail:" & FolioData.GetMailCount() & " cases:" & FolioData.GetCaseCount() & ")"
+            " mail:" & CaseDeskData.GetMailCount() & " cases:" & CaseDeskData.GetCaseCount() & ")"
     End If
 
     If m_currentRecIdx > 0 Then
@@ -1388,7 +1388,7 @@ End Sub
 
 Private Sub LogDiffsFromSheet()
     On Error GoTo DiffExit
-    Dim ws As Worksheet: Set ws = ThisWorkbook.Worksheets("_folio_diff")
+    Dim ws As Worksheet: Set ws = ThisWorkbook.Worksheets("_casedesk_diff")
     If ws.Range("A1").Value = "" Then Exit Sub
     Dim data As Variant: data = ws.UsedRange.Value
     If IsEmpty(data) Then Exit Sub
@@ -1397,7 +1397,7 @@ Private Sub LogDiffsFromSheet()
     Dim i As Long
     For i = 1 To UBound(data, 1)
         If Len(CStr(data(i, 1))) = 0 Then GoTo NextDiff
-        Dim d As Object: Set d = FolioLib.NewDict()
+        Dim d As Object: Set d = CaseDeskLib.NewDict()
         d.Add "action", CStr(data(i, 1))
         d.Add "type", CStr(data(i, 2))
         d.Add "id", CStr(data(i, 3))
@@ -1407,13 +1407,13 @@ NextDiff:
     Next i
 
     If diffs.Count = 0 Then Exit Sub
-    FolioLib.AddLogEntries diffs
+    CaseDeskLib.AddLogEntries diffs
 
     For i = 1 To diffs.Count
         Dim de As Object: Set de = diffs(i)
-        Dim action As String: action = FolioLib.DictStr(de, "action")
-        Dim dtype As String: dtype = FolioLib.DictStr(de, "type")
-        Dim desc As String: desc = FolioLib.DictStr(de, "description")
+        Dim action As String: action = CaseDeskLib.DictStr(de, "action")
+        Dim dtype As String: dtype = CaseDeskLib.DictStr(de, "type")
+        Dim desc As String: desc = CaseDeskLib.DictStr(de, "description")
         Dim prefix As String
         If action = "added" Then prefix = "+" Else prefix = "-"
         Dim line As String
@@ -1436,15 +1436,15 @@ Public Sub DoPollCycle()
     If Not m_workerPending Then Exit Sub
     m_workerPending = False
     On Error Resume Next
-    If FolioMain.g_workerApp Is Nothing Then
+    If CaseDeskMain.g_workerApp Is Nothing Then
         If Not m_lblStatus Is Nothing Then m_lblStatus.Caption = "  Starting worker..."
         DoEvents
-        FolioMain.StartWorker m_pendingMailFolder, m_pendingCaseRoot, m_pendingMatchField, m_pendingMatchMode
+        CaseDeskMain.StartWorker m_pendingMailFolder, m_pendingCaseRoot, m_pendingMatchField, m_pendingMatchMode
         If Not m_lblStatus Is Nothing Then m_lblStatus.Caption = "  Scanning..."
     Else
         If Not m_lblStatus Is Nothing Then m_lblStatus.Caption = "  Updating config..."
         DoEvents
-        FolioMain.g_workerApp.Run "FolioWorker.UpdateConfig", _
+        CaseDeskMain.g_workerApp.Run "CaseDeskWorker.UpdateConfig", _
             m_pendingMailFolder, m_pendingCaseRoot, m_pendingMatchField, m_pendingMatchMode
     End If
     On Error GoTo 0
@@ -1469,7 +1469,7 @@ End Sub
 ' ============================================================================
 
 Private Sub m_cmbSource_Change()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "cmbSource_Change"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "cmbSource_Change"
     On Error GoTo ErrHandler
     If m_cmbSource.ListIndex >= 0 Then SwitchSource m_cmbSource.Text
     eh.OK: Exit Sub
@@ -1478,7 +1478,7 @@ End Sub
 
 Private Sub m_txtFilter_Change()
     If m_loading Then Exit Sub
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "txtFilter_Change"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "txtFilter_Change"
     On Error GoTo ErrHandler
     UpdateRecordList
     eh.OK: Exit Sub
@@ -1486,7 +1486,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Sub m_lstRecords_Click()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "lstRecords_Click"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "lstRecords_Click"
     On Error GoTo ErrHandler
 
     UpdateDetail
@@ -1495,7 +1495,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Sub m_lstRecords_DblClick(ByVal Cancel As MSForms.ReturnBoolean)
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "lstRecords_DblClick"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "lstRecords_DblClick"
     On Error GoTo ErrHandler
     If m_currentTable Is Nothing Then Exit Sub
     m_currentTable.Parent.Activate
@@ -1505,27 +1505,27 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Sub m_cmdSettings_Click()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "cmdSettings_Click"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "cmdSettings_Click"
     On Error GoTo ErrHandler
 
     frmSettings.Show vbModal
-    Me.Caption = "folio"
+    Me.Caption = "CaseDesk"
     LoadSources
     eh.OK: Exit Sub
 ErrHandler: eh.Catch
 End Sub
 
 Private Sub m_cmdLogClear_Click()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "cmdLogClear_Click"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "cmdLogClear_Click"
     On Error GoTo ErrHandler
-    FolioLib.ClearLog
+    CaseDeskLib.ClearLog
     m_lstLog.Clear
     eh.OK: Exit Sub
 ErrHandler: eh.Catch
 End Sub
 
 Private Sub m_lstMail_Click()
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "lstMail_Click"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "lstMail_Click"
     On Error GoTo ErrHandler
     If m_lstMail Is Nothing Then Exit Sub
     Dim idx As Long: idx = m_lstMail.ListIndex
@@ -1557,7 +1557,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Sub m_lstMail_DblClick(ByVal Cancel As MSForms.ReturnBoolean)
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "lstMail_DblClick"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "lstMail_DblClick"
     On Error GoTo ErrHandler
     If m_lstMail Is Nothing Then Exit Sub
     Dim idx As Long: idx = m_lstMail.ListIndex
@@ -1570,7 +1570,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Sub m_lstAttach_DblClick(ByVal Cancel As MSForms.ReturnBoolean)
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "lstAttach_DblClick"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "lstAttach_DblClick"
     On Error GoTo ErrHandler
     If m_lstAttach Is Nothing Or m_lstMail Is Nothing Then Exit Sub
     Dim mi As Long: mi = m_lstMail.ListIndex
@@ -1588,7 +1588,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Sub m_lstFiles_DblClick(ByVal Cancel As MSForms.ReturnBoolean)
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "lstFiles_DblClick"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "lstFiles_DblClick"
     On Error GoTo ErrHandler
     If m_lstFiles Is Nothing Then Exit Sub
     Dim idx As Long: idx = m_lstFiles.ListIndex
@@ -1624,22 +1624,22 @@ Private Sub UserForm_KeyDown(ByVal KeyCode As MSForms.ReturnInteger, ByVal Shift
 End Sub
 
 Private Sub UserForm_QueryClose(Cancel As Integer, CloseMode As Integer)
-    Dim eh As New ErrorHandler: eh.Enter "frmFolio", "QueryClose"
+    Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "QueryClose"
     On Error GoTo ErrHandler
-    FolioMain.g_formLoaded = False
+    CaseDeskMain.g_formLoaded = False
 
-    If FolioMain.g_forceClose Then
+    If CaseDeskMain.g_forceClose Then
         CleanupRefs
         eh.OK: Exit Sub
     End If
 
-    FolioLib.SetLng "window_width", CLng(Me.Width)
-    FolioLib.SetLng "window_height", CLng(Me.Height)
-    FolioLib.SetLng "left_width", CLng(m_leftW)
-    FolioLib.SetLng "right_width", CLng(m_rightW)
-    FolioLib.SetLng "font_size", m_fontSize
-    FolioLib.SetStr "selected_source", m_currentSource
-    FolioLib.SetStr "search_text", m_txtFilter.Text
+    CaseDeskLib.SetLng "window_width", CLng(Me.Width)
+    CaseDeskLib.SetLng "window_height", CLng(Me.Height)
+    CaseDeskLib.SetLng "left_width", CLng(m_leftW)
+    CaseDeskLib.SetLng "right_width", CLng(m_rightW)
+    CaseDeskLib.SetLng "font_size", m_fontSize
+    CaseDeskLib.SetStr "selected_source", m_currentSource
+    CaseDeskLib.SetStr "search_text", m_txtFilter.Text
     CleanupRefs
     eh.OK: Exit Sub
 ErrHandler: eh.Catch
@@ -1650,7 +1650,7 @@ Private Sub CleanupRefs()
     CommitPendingEdits
     If Not m_watcher Is Nothing Then m_watcher.StopWatching
     Set m_watcher = Nothing
-    FolioMain.StopWorker
+    CaseDeskMain.StopWorker
     Set m_currentTable = Nothing
     Set m_filteredRows = Nothing
     Set m_fieldEditors = Nothing

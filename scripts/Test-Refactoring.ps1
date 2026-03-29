@@ -1,19 +1,19 @@
 # Test-Refactoring.ps1
-# Automated smoke test for refactored folio
-# Opens folio.xlsm + sample data, runs Folio_ShowPanel, checks results
+# Automated smoke test for refactored casedesk
+# Opens casedesk.xlsm + sample data, runs CaseDesk_ShowPanel, checks results
 
 param([int]$TimeoutSeconds = 30)
 
 $ErrorActionPreference = 'Stop'
 $projectDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$folioPath = Join-Path $projectDir 'folio.xlsm'
-$samplePath = Join-Path $projectDir 'sample\folio-sample.xlsx'
+$casedeskPath = Join-Path $projectDir 'casedesk.xlsm'
+$samplePath = Join-Path $projectDir 'sample\casedesk-sample.xlsx'
 
-if (-not (Test-Path $folioPath)) { Write-Error "folio.xlsm not found. Run Build-Addin.ps1 first."; exit 1 }
-if (-not (Test-Path $samplePath)) { Write-Error "folio-sample.xlsx not found."; exit 1 }
+if (-not (Test-Path $casedeskPath)) { Write-Error "casedesk.xlsm not found. Run Build-Addin.ps1 first."; exit 1 }
+if (-not (Test-Path $samplePath)) { Write-Error "casedesk-sample.xlsx not found."; exit 1 }
 
 $excel = $null
-$folioWb = $null
+$casedeskWb = $null
 $sampleWb = $null
 $passed = 0
 $failed = 0
@@ -48,57 +48,57 @@ try {
     $sampleWb = $excel.Workbooks.Open($samplePath, 0, $false)
     Test "Sample workbook opened" ($sampleWb -ne $null)
 
-    # 3. Open folio.xlsm
-    Write-Host "[3] Opening folio.xlsm..." -ForegroundColor Yellow
-    $folioWb = $excel.Workbooks.Open($folioPath, 0, $false)
+    # 3. Open casedesk.xlsm
+    Write-Host "[3] Opening casedesk.xlsm..." -ForegroundColor Yellow
+    $casedeskWb = $excel.Workbooks.Open($casedeskPath, 0, $false)
     $excel.AutomationSecurity = $prevSec
-    Test "Folio workbook opened" ($folioWb -ne $null)
+    Test "CaseDesk workbook opened" ($casedeskWb -ne $null)
 
     # 4. Check modules exist
     Write-Host "[4] Checking VBA modules..." -ForegroundColor Yellow
-    $vbProj = $folioWb.VBProject
+    $vbProj = $casedeskWb.VBProject
     $moduleNames = @()
     foreach ($comp in $vbProj.VBComponents) { $moduleNames += $comp.Name }
-    Test "FolioMain exists" ($moduleNames -contains "FolioMain")
-    Test "FolioData exists" ($moduleNames -contains "FolioData")
-    Test "FolioLib exists" ($moduleNames -contains "FolioLib")
-    Test "FolioWorker exists" ($moduleNames -contains "FolioWorker")
-    Test "FolioHelpers removed" (-not ($moduleNames -contains "FolioHelpers"))
-    Test "FolioConfig removed" (-not ($moduleNames -contains "FolioConfig"))
-    Test "FolioChangeLog removed" (-not ($moduleNames -contains "FolioChangeLog"))
-    Test "FolioScanner removed" (-not ($moduleNames -contains "FolioScanner"))
-    Test "FolioDraft removed" (-not ($moduleNames -contains "FolioDraft"))
-    Test "FolioPrint removed" (-not ($moduleNames -contains "FolioPrint"))
-    Test "FolioBundler removed" (-not ($moduleNames -contains "FolioBundler"))
+    Test "CaseDeskMain exists" ($moduleNames -contains "CaseDeskMain")
+    Test "CaseDeskData exists" ($moduleNames -contains "CaseDeskData")
+    Test "CaseDeskLib exists" ($moduleNames -contains "CaseDeskLib")
+    Test "CaseDeskWorker exists" ($moduleNames -contains "CaseDeskWorker")
+    Test "CaseDeskHelpers removed" (-not ($moduleNames -contains "CaseDeskHelpers"))
+    Test "CaseDeskConfig removed" (-not ($moduleNames -contains "CaseDeskConfig"))
+    Test "CaseDeskChangeLog removed" (-not ($moduleNames -contains "CaseDeskChangeLog"))
+    Test "CaseDeskScanner removed" (-not ($moduleNames -contains "CaseDeskScanner"))
+    Test "CaseDeskDraft removed" (-not ($moduleNames -contains "CaseDeskDraft"))
+    Test "CaseDeskPrint removed" (-not ($moduleNames -contains "CaseDeskPrint"))
+    Test "CaseDeskBundler removed" (-not ($moduleNames -contains "CaseDeskBundler"))
     Test "frmFilter removed" (-not ($moduleNames -contains "frmFilter"))
     Test "frmDraft removed" (-not ($moduleNames -contains "frmDraft"))
     Test "WorkerWatcher removed" (-not ($moduleNames -contains "WorkerWatcher"))
 
-    # 5. Run Folio_ShowPanel (creates hidden sheets + shows form)
-    Write-Host "[5] Running Folio_ShowPanel..." -ForegroundColor Yellow
+    # 5. Run CaseDesk_ShowPanel (creates hidden sheets + shows form)
+    Write-Host "[5] Running CaseDesk_ShowPanel..." -ForegroundColor Yellow
     try {
-        $excel.Run("FolioMain.Folio_ShowPanel")
-        Test "Folio_ShowPanel executed" $true
+        $excel.Run("CaseDeskMain.CaseDesk_ShowPanel")
+        Test "CaseDesk_ShowPanel executed" $true
     } catch {
-        Test "Folio_ShowPanel executed" $false $_.Exception.Message
+        Test "CaseDesk_ShowPanel executed" $false $_.Exception.Message
     }
 
-    # 6. Check hidden sheets exist (created by EnsureFolioSheets inside ShowPanel)
+    # 6. Check hidden sheets exist (created by EnsureCaseDeskSheets inside ShowPanel)
     Write-Host "[6] Checking hidden sheets..." -ForegroundColor Yellow
     $sheetNames = @()
-    foreach ($ws in $folioWb.Worksheets) { $sheetNames += $ws.Name }
-    Test "_folio_signal exists" ($sheetNames -contains "_folio_signal")
-    Test "_folio_mail exists" ($sheetNames -contains "_folio_mail")
-    Test "_folio_cases exists" ($sheetNames -contains "_folio_cases")
-    Test "_folio_files exists" ($sheetNames -contains "_folio_files")
-    Test "_folio_request exists" ($sheetNames -contains "_folio_request")
+    foreach ($ws in $casedeskWb.Worksheets) { $sheetNames += $ws.Name }
+    Test "_casedesk_signal exists" ($sheetNames -contains "_casedesk_signal")
+    Test "_casedesk_mail exists" ($sheetNames -contains "_casedesk_mail")
+    Test "_casedesk_cases exists" ($sheetNames -contains "_casedesk_cases")
+    Test "_casedesk_files exists" ($sheetNames -contains "_casedesk_files")
+    Test "_casedesk_request exists" ($sheetNames -contains "_casedesk_request")
 
-    # 7. Test FolioWorker scanner directly (in-process, no cross-process worker)
+    # 7. Test CaseDeskWorker scanner directly (in-process, no cross-process worker)
     Write-Host "[7] Reading config..." -ForegroundColor Yellow
     $mailFolder = ""
     $caseRoot = ""
     try {
-        $cfgSheet = $folioWb.Worksheets.Item("_folio_config")
+        $cfgSheet = $casedeskWb.Worksheets.Item("_casedesk_config")
         $cfgRows = $cfgSheet.UsedRange.Rows.Count
         for ($r = 1; $r -le $cfgRows; $r++) {
             $k = $cfgSheet.Cells($r, 1).Text
@@ -111,12 +111,12 @@ try {
     Write-Host "  cases=$caseRoot" -ForegroundColor Gray
 
     # 8. Test scanner: RefreshMailData
-    Write-Host "[8] Testing FolioWorker.RefreshMailData..." -ForegroundColor Yellow
+    Write-Host "[8] Testing CaseDeskWorker.RefreshMailData..." -ForegroundColor Yellow
     try {
-        $excel.Run("FolioWorker.SetMailMatchConfig", "sender_email", "exact")
-        $mailChanged = $excel.Run("FolioWorker.RefreshMailData", $mailFolder)
+        $excel.Run("CaseDeskWorker.SetMailMatchConfig", "sender_email", "exact")
+        $mailChanged = $excel.Run("CaseDeskWorker.RefreshMailData", $mailFolder)
         Test "RefreshMailData succeeded" $true
-        $mailRecords = $excel.Run("FolioWorker.GetMailRecords")
+        $mailRecords = $excel.Run("CaseDeskWorker.GetMailRecords")
         $mailCount = $mailRecords.Count
         Test "Mail records loaded" ($mailCount -gt 0) "count=$mailCount"
         Write-Host "  Mail records: $mailCount" -ForegroundColor Gray
@@ -125,11 +125,11 @@ try {
     }
 
     # 9. Test scanner: RefreshCaseNames
-    Write-Host "[9] Testing FolioWorker.RefreshCaseNames..." -ForegroundColor Yellow
+    Write-Host "[9] Testing CaseDeskWorker.RefreshCaseNames..." -ForegroundColor Yellow
     try {
-        $caseChanged = $excel.Run("FolioWorker.RefreshCaseNames", $caseRoot)
+        $caseChanged = $excel.Run("CaseDeskWorker.RefreshCaseNames", $caseRoot)
         Test "RefreshCaseNames succeeded" $true
-        $caseNames = $excel.Run("FolioWorker.GetCaseNames")
+        $caseNames = $excel.Run("CaseDeskWorker.GetCaseNames")
         $caseCount = $caseNames.Count
         Test "Case names loaded" ($caseCount -gt 0) "count=$caseCount"
         Write-Host "  Case names: $caseCount" -ForegroundColor Gray
@@ -137,10 +137,10 @@ try {
         Test "RefreshCaseNames succeeded" $false $_.Exception.Message
     }
 
-    # 10. Test FolioData table operations
-    Write-Host "[10] Testing FolioData table operations..." -ForegroundColor Yellow
+    # 10. Test CaseDeskData table operations
+    Write-Host "[10] Testing CaseDeskData table operations..." -ForegroundColor Yellow
     try {
-        $tableNames = $excel.Run("FolioData.GetWorkbookTableNames", $sampleWb)
+        $tableNames = $excel.Run("CaseDeskData.GetWorkbookTableNames", $sampleWb)
         # COM Collection.Count returns as PSMethod in PowerShell; just check non-null
         Test "GetWorkbookTableNames succeeded" ($tableNames -ne $null)
     } catch {
@@ -157,25 +157,25 @@ try {
         Write-Host "  Manifest lines: $manifestLines" -ForegroundColor Gray
     }
 
-    # 12. Check _folio_files is empty (on-demand, not preloaded)
+    # 12. Check _casedesk_files is empty (on-demand, not preloaded)
     Write-Host "[12] Checking on-demand files..." -ForegroundColor Yellow
-    $filesSheet = $folioWb.Worksheets.Item("_folio_files")
+    $filesSheet = $casedeskWb.Worksheets.Item("_casedesk_files")
     $filesA1 = $filesSheet.Range("A1").Text
-    Test "_folio_files empty at startup (on-demand)" ($filesA1.Length -eq 0)
+    Test "_casedesk_files empty at startup (on-demand)" ($filesA1.Length -eq 0)
 
-    # 14. Check no WinAPI declarations in FolioMain
+    # 14. Check no WinAPI declarations in CaseDeskMain
     Write-Host "[9] Checking no WinAPI..." -ForegroundColor Yellow
-    $mainCode = $vbProj.VBComponents.Item("FolioMain").CodeModule
+    $mainCode = $vbProj.VBComponents.Item("CaseDeskMain").CodeModule
     $mainText = ""
     if ($mainCode.CountOfLines -gt 0) {
         $mainText = $mainCode.Lines(1, $mainCode.CountOfLines)
     }
-    Test "No Declare Function in FolioMain" (-not ($mainText -match "Declare\s+(PtrSafe\s+)?Function"))
+    Test "No Declare Function in CaseDeskMain" (-not ($mainText -match "Declare\s+(PtrSafe\s+)?Function"))
 
     # 15. Stop worker cleanly
     Write-Host "[10] Stopping worker..." -ForegroundColor Yellow
     try {
-        $excel.Run("FolioMain.StopWorker")
+        $excel.Run("CaseDeskMain.StopWorker")
         Test "Worker stopped" $true
     } catch {
         Test "Worker stopped" $false $_.Exception.Message
@@ -191,9 +191,9 @@ try {
     Write-Host "Cleaning up..." -ForegroundColor Yellow
     try {
         # Unload form if loaded
-        try { $excel.Run("FolioMain.BeforeWorkbookClose") } catch {}
+        try { $excel.Run("CaseDeskMain.BeforeWorkbookClose") } catch {}
         if ($sampleWb) { $sampleWb.Close($false); [System.Runtime.InteropServices.Marshal]::ReleaseComObject($sampleWb) | Out-Null }
-        if ($folioWb) { $folioWb.Close($false); [System.Runtime.InteropServices.Marshal]::ReleaseComObject($folioWb) | Out-Null }
+        if ($casedeskWb) { $casedeskWb.Close($false); [System.Runtime.InteropServices.Marshal]::ReleaseComObject($casedeskWb) | Out-Null }
     } catch {}
     if ($excel) {
         $excel.Quit()

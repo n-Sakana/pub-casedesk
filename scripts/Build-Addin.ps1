@@ -1,4 +1,4 @@
-﻿# Build-Addin.ps1
+# Build-Addin.ps1
 # VBAソースファイルをインポートした開発用.xlsmを自動生成する
 #
 # 前提条件:
@@ -22,10 +22,10 @@ $projectDir = Split-Path -Parent $scriptDir
 $srcDir = Join-Path $projectDir 'src'
 
 $basModules = @(
-    'FolioLib.bas',
-    'FolioData.bas',
-    'FolioMain.bas',
-    'FolioWorker.bas'
+    'CaseDeskLib.bas',
+    'CaseDeskData.bas',
+    'CaseDeskMain.bas',
+    'CaseDeskWorker.bas'
 )
 $clsModules = @(
     'ErrorHandler.cls',
@@ -33,7 +33,7 @@ $clsModules = @(
     'SheetWatcher.cls'
 )
 $frmModules = @(
-    @{ Name = 'frmFolio';       File = 'frmFolio.frm' },
+    @{ Name = 'frmCaseDesk';       File = 'frmCaseDesk.frm' },
     @{ Name = 'frmSettings';    File = 'frmSettings.frm' }
 )
 
@@ -115,16 +115,16 @@ Option Explicit
 
 Private Sub Workbook_BeforeClose(Cancel As Boolean)
     On Error Resume Next
-    FolioMain.BeforeWorkbookClose
+    CaseDeskMain.BeforeWorkbookClose
     Me.Saved = True
 End Sub
 
 Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     On Error Resume Next
     Dim sn As String: sn = Sh.Name
-    If Left$(sn, 6) <> "_folio" Then Exit Sub
+    If Left$(sn, Len("_casedesk")) <> "_casedesk" Then Exit Sub
     Application.ScreenUpdating = False
-    If FolioMain.g_formLoaded Then frmFolio.OnFolioSheetChange sn
+    If CaseDeskMain.g_formLoaded Then frmCaseDesk.OnCaseDeskSheetChange sn
     Application.ScreenUpdating = True
     On Error GoTo 0
 End Sub
@@ -139,9 +139,9 @@ End Sub
     $mailDir = Join-Path $sampleDir 'mail'
     $casesDir = Join-Path $sampleDir 'cases'
 
-    # _folio_config: key-value pairs
+    # _casedesk_config: key-value pairs
     $cfgSheet = $wb.Worksheets.Add([System.Reflection.Missing]::Value, $wb.Worksheets.Item($wb.Worksheets.Count))
-    $cfgSheet.Name = "_folio_config"
+    $cfgSheet.Name = "_casedesk_config"
     $cfgSheet.Visible = 2  # xlSheetVeryHidden
     $cfgSheet.Range("A1").Value2 = "key"
     $cfgSheet.Range("B1").Value2 = "value"
@@ -149,15 +149,15 @@ End Sub
     $cfgSheet.Range("A3").Value2 = "mail_folder"
     $cfgSheet.Range("A4").Value2 = "case_folder_root"
     if ($Sample) {
-        $sampleXlsx = Join-Path $sampleDir 'folio-sample.xlsx'
+        $sampleXlsx = Join-Path $sampleDir 'casedesk-sample.xlsx'
         $cfgSheet.Range("B2").Value2 = $sampleXlsx
         $cfgSheet.Range("B3").Value2 = $mailDir
         $cfgSheet.Range("B4").Value2 = $casesDir
     }
 
-    # _folio_sources: one row per source
+    # _casedesk_sources: one row per source
     $srcSheet = $wb.Worksheets.Add([System.Reflection.Missing]::Value, $wb.Worksheets.Item($wb.Worksheets.Count))
-    $srcSheet.Name = "_folio_sources"
+    $srcSheet.Name = "_casedesk_sources"
     $srcSheet.Visible = 2  # xlSheetVeryHidden
     $srcSheet.Range("A1").Value2 = "source_name"
     $srcSheet.Range("B1").Value2 = "key_column"
@@ -191,9 +191,9 @@ End Sub
         [System.Runtime.InteropServices.Marshal]::ReleaseComObject($sampleWb) | Out-Null
     }
 
-    # _folio_fields: one row per source+field
+    # _casedesk_fields: one row per source+field
     $fldSheet = $wb.Worksheets.Add([System.Reflection.Missing]::Value, $wb.Worksheets.Item($wb.Worksheets.Count))
-    $fldSheet.Name = "_folio_fields"
+    $fldSheet.Name = "_casedesk_fields"
     $fldSheet.Visible = 2  # xlSheetVeryHidden
     $fldSheet.Range("A1").Value2 = "source_name"
     $fldSheet.Range("B1").Value2 = "field_name"
@@ -202,9 +202,9 @@ End Sub
     $fldSheet.Range("E1").Value2 = "editable"
     $fldSheet.Range("F1").Value2 = "multiline"
 
-    # _folio_log (with ListObject table)
+    # _casedesk_log (with ListObject table)
     $logSheet = $wb.Worksheets.Add([System.Reflection.Missing]::Value, $wb.Worksheets.Item($wb.Worksheets.Count))
-    $logSheet.Name = "_folio_log"
+    $logSheet.Name = "_casedesk_log"
     $logSheet.Visible = 2  # xlSheetVeryHidden
     $logSheet.Range("A1").Value2 = "timestamp"
     $logSheet.Range("B1").Value2 = "source"
@@ -214,13 +214,13 @@ End Sub
     $logSheet.Range("F1").Value2 = "new_value"
     $logSheet.Range("G1").Value2 = "origin"
     $logTable = $logSheet.ListObjects.Add(1, $logSheet.Range("A1:G1"), $null, 1)  # xlSrcRange, xlYes
-    $logTable.Name = "FolioLog"
+    $logTable.Name = "CaseDeskLog"
 
     Write-Host "  config: mail=$mailDir, cases=$casesDir" -ForegroundColor Green
 
     # --- Save ---
     if ([string]::IsNullOrWhiteSpace($OutputName)) {
-        $outputName = "folio.$OutputFormat"
+        $outputName = "casedesk.$OutputFormat"
     } else {
         $outputName = $OutputName
     }

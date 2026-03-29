@@ -1,8 +1,8 @@
-Attribute VB_Name = "FolioWorker"
+Attribute VB_Name = "CaseDeskWorker"
 Option Explicit
 
 ' ============================================================================
-' FolioWorker - Background scanning module
+' CaseDeskWorker - Background scanning module
 ' Runs in a separate Excel.Application instance (Visible=False).
 ' Scans mail/case folders, writes results directly to FE's hidden sheets.
 ' FE's Worksheet_Change fires on write (no polling needed).
@@ -27,7 +27,7 @@ Private g_mailDirty As Boolean       ' mail scan found changes
 Private g_casesDirty As Boolean      ' cases scan found changes
 
 ' ============================================================================
-' BE-side cache (formerly FolioScanner)
+' BE-side cache (formerly CaseDeskScanner)
 ' These variables are only populated in the worker process.
 ' ============================================================================
 
@@ -40,20 +40,19 @@ Private m_mailIndexMode As String
 Private m_mailAdded As Object
 Private m_mailRemoved As Object
 Private m_mailDiffReady As Boolean
-Private m_mailRootMod As Date       ' Last known mail root folder mod time
-Private m_manifestMod As Date       ' Last known manifest.tsv mod time
+Private m_manifestMod As Date       ' Last known manifest.csv mod time
 Private m_caseNames As Object
 Private m_caseAdded As Object
 Private m_caseRemoved As Object
 Private m_caseDiffReady As Boolean
-Private m_caseRootMod As Date       ' Last known case root folder mod time
-Private m_caseFiles As Object       ' Dict: full_file_path -> tab-separated line (all cases)
+Private m_caseManifestMod As Date    ' Last known case manifest.csv mod time
+Private m_caseFiles As Object       ' Dict: item_id -> record dict
 Private m_caseFilesDirty As Boolean
 
 Private Sub LogProfile(msg As String)
     On Error Resume Next
     Dim f As Long: f = FreeFile
-    Open ThisWorkbook.path & "\.folio_cache\_profile.log" For Append As #f
+    Open ThisWorkbook.path & "\.casedesk_cache\_profile.log" For Append As #f
     Print #f, Format$(Now, "hh:nn:ss") & " " & msg
     Close #f
     On Error GoTo 0
@@ -71,11 +70,10 @@ Public Sub ClearCache()
     m_mailIndexField = ""
     m_mailIndexMode = ""
     m_mailDiffReady = False
-    m_mailRootMod = #1/1/1900#
     m_manifestMod = #1/1/1900#
     Set m_caseNames = Nothing
     m_caseDiffReady = False
-    m_caseRootMod = #1/1/1900#
+    m_caseManifestMod = #1/1/1900#
     Set m_caseFiles = Nothing
     m_caseFilesDirty = False
 End Sub
@@ -85,39 +83,21 @@ End Sub
 ' ============================================================================
 
 Public Function RefreshMailData(folderPath As String) As Boolean
-    Dim eh As New ErrorHandler: eh.Enter "FolioWorker", "RefreshMailData"
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskWorker", "RefreshMailData"
     On Error GoTo ErrHandler
     RefreshMailData = False
-    If Not FolioLib.FolderExists(folderPath) Then eh.OK: Exit Function
 
-    ' Check manifest.tsv first (fast path: single file mtime check)
-    Dim manifestPath As String: manifestPath = folderPath & "\manifest.tsv"
-    Dim hasManifest As Boolean: hasManifest = (Len(Dir$(manifestPath)) > 0)
+    Dim manifestPath As String: manifestPath = folderPath & "\manifest.csv"
+    If Len(Dir$(manifestPath)) = 0 Then eh.OK: Exit Function
 
-    ' Always check root folder mtime (detects added/removed subfolders)
-    Dim curMailMod As Date: curMailMod = FileDateTime(folderPath)
-    If hasManifest Then
-        Dim curManifestMod As Date: curManifestMod = FileDateTime(manifestPath)
-        If m_mailDiffReady And curManifestMod = m_manifestMod And curMailMod = m_mailRootMod Then eh.OK: Exit Function
-        If curMailMod <> m_mailRootMod Then
-            ' Root folder changed — rescan and rebuild manifest
-            m_mailRootMod = curMailMod
-            ScanMailDirAndBuildManifest folderPath, manifestPath
-            m_manifestMod = FileDateTime(manifestPath)
-        Else
-            ' Only manifest changed (external edit)
-            m_manifestMod = curManifestMod
-            LoadMailFromManifest manifestPath
-        End If
-    Else
-        If m_mailDiffReady And curMailMod = m_mailRootMod Then eh.OK: Exit Function
-        m_mailRootMod = curMailMod
-        ScanMailDirAndBuildManifest folderPath, manifestPath
-    End If
+    Dim curMod As Date: curMod = FileDateTime(manifestPath)
+    If m_mailDiffReady And curMod = m_manifestMod Then eh.OK: Exit Function
+    m_manifestMod = curMod
+    LoadMailFromManifest manifestPath
 
     If Not m_mailDiffReady Then
-        Set m_mailAdded = FolioLib.NewDict()
-        Set m_mailRemoved = FolioLib.NewDict()
+        Set m_mailAdded = CaseDeskLib.NewDict()
+        Set m_mailRemoved = CaseDeskLib.NewDict()
         m_mailDiffReady = True
     End If
 
@@ -126,32 +106,35 @@ Public Function RefreshMailData(folderPath As String) As Boolean
 ErrHandler: eh.Catch
 End Function
 
-' Fast path: read manifest.tsv (10 columns, tab-separated)
-' Format: entry_id<TAB>sender_email<TAB>sender_name<TAB>subject<TAB>received_at
-'         <TAB>folder_path<TAB>body_path<TAB>msg_path<TAB>attachment_paths<TAB>_mail_folder
+' Fast path: read manifest.csv (11 columns, comma-separated, with header)
+' Format: entry_id,sender_email,sender_name,subject,received_at,
+'         folder_path,body_path,msg_path,attachment_paths,mail_folder,body_text
 Private Sub LoadMailFromManifest(manifestPath As String)
     On Error Resume Next
     Dim t0 As Single: t0 = Timer
-    Dim content As String: content = FolioLib.ReadTextFile(manifestPath)
+    Dim content As String: content = CaseDeskLib.ReadTextFile(manifestPath)
     If Len(content) = 0 Then Exit Sub
 
     Dim prevRecords As Object: Set prevRecords = m_mailRecords
-    Set m_mailRecords = FolioLib.NewDict()
-    Set m_mailByEntryId = FolioLib.NewDict()
-    Set m_mailIndex = FolioLib.NewDict()
-    Set m_mailAdded = FolioLib.NewDict()
-    Set m_mailRemoved = FolioLib.NewDict()
+    Set m_mailRecords = CaseDeskLib.NewDict()
+    Set m_mailByEntryId = CaseDeskLib.NewDict()
+    Set m_mailIndex = CaseDeskLib.NewDict()
+    Set m_mailAdded = CaseDeskLib.NewDict()
+    Set m_mailRemoved = CaseDeskLib.NewDict()
 
     Dim lines() As String: lines = Split(content, vbLf)
     Dim i As Long
     For i = 0 To UBound(lines)
-        If Len(lines(i)) = 0 Then GoTo NextManifestLine
-        Dim cols() As String: cols = Split(lines(i), vbTab)
+        Dim line As String: line = lines(i)
+        If Len(line) = 0 Then GoTo NextManifestLine
+        ' Skip header row
+        If Left$(line, 8) = "entry_id" Then GoTo NextManifestLine
+        Dim cols() As String: cols = Split(line, ",")
         If UBound(cols) < 9 Then GoTo NextManifestLine
         Dim eid As String: eid = cols(0)
         If Len(eid) = 0 Then GoTo NextManifestLine
 
-        Dim rec As Object: Set rec = FolioLib.NewDict()
+        Dim rec As Object: Set rec = CaseDeskLib.NewDict()
         rec.Add "entry_id", eid
         rec.Add "sender_email", cols(1)
         rec.Add "sender_name", cols(2)
@@ -161,7 +144,7 @@ Private Sub LoadMailFromManifest(manifestPath As String)
         rec.Add "body_path", cols(6)
         rec.Add "msg_path", cols(7)
         ' Parse attachment_paths (pipe-separated)
-        Dim attDict As Object: Set attDict = FolioLib.NewDict()
+        Dim attDict As Object: Set attDict = CaseDeskLib.NewDict()
         If Len(cols(8)) > 0 Then
             Dim attParts() As String: attParts = Split(cols(8), "|")
             Dim a As Long
@@ -174,6 +157,7 @@ Private Sub LoadMailFromManifest(manifestPath As String)
         End If
         rec.Add "attachment_paths", attDict
         rec.Add "_mail_folder", cols(9)
+        If UBound(cols) >= 10 Then rec.Add "body_text", cols(10)
 
         Set m_mailRecords(cols(9)) = rec
         Set m_mailByEntryId(eid) = rec
@@ -195,10 +179,10 @@ NextManifestLine:
             For i = 0 To UBound(pKeys)
                 If Not m_mailRecords.Exists(pKeys(i)) Then
                     Dim remRec As Object: Set remRec = prevRecords(pKeys(i))
-                    Dim remEid As String: remEid = FolioLib.DictStr(remRec, "entry_id")
+                    Dim remEid As String: remEid = CaseDeskLib.DictStr(remRec, "entry_id")
                     If Len(remEid) > 0 Then
-                        m_mailRemoved(remEid) = FolioLib.DictStr(remRec, "subject") & _
-                            " - " & FolioLib.DictStr(remRec, "sender_email")
+                        m_mailRemoved(remEid) = CaseDeskLib.DictStr(remRec, "subject") & _
+                            " - " & CaseDeskLib.DictStr(remRec, "sender_email")
                     End If
                 End If
             Next i
@@ -206,139 +190,6 @@ NextManifestLine:
     End If
 
     LogProfile "LoadMailFromManifest: " & Format$(Timer - t0, "0.000") & "s (" & m_mailRecords.Count & " records)"
-    On Error GoTo 0
-End Sub
-
-' Fallback: Dir$ + meta.json scan, then write manifest.tsv for future fast loading
-Private Sub ScanMailDirAndBuildManifest(rootPath As String, manifestPath As String)
-    On Error Resume Next
-    If m_mailRecords Is Nothing Then
-        Set m_mailRecords = FolioLib.NewDict()
-        Set m_mailByEntryId = FolioLib.NewDict()
-        If Len(m_mailIndexField) > 0 Then Set m_mailIndex = FolioLib.NewDict()
-    End If
-    Set m_mailAdded = FolioLib.NewDict()
-    Set m_mailRemoved = FolioLib.NewDict()
-
-    Dim t0 As Single: t0 = Timer
-    Dim manifestLines As New Collection
-
-    ' Recursive scan of all subdirectories for meta.json
-    Dim seenPaths As Object: Set seenPaths = FolioLib.NewDict()
-    ScanMailDirRecursive rootPath, seenPaths, manifestLines
-
-    ' Remove deleted entries
-    If m_mailRecords.Count > 0 Then
-        Dim keys As Variant: keys = m_mailRecords.keys
-        Dim i As Long
-        For i = 0 To UBound(keys)
-            If Not seenPaths.Exists(keys(i)) Then
-                Dim remRec As Object: Set remRec = m_mailRecords(keys(i))
-                Dim remEid As String: remEid = FolioLib.DictStr(remRec, "entry_id")
-                If Len(remEid) > 0 Then
-                    m_mailRemoved(remEid) = FolioLib.DictStr(remRec, "subject") & _
-                        " - " & FolioLib.DictStr(remRec, "sender_email")
-                    If m_mailByEntryId.Exists(remEid) Then m_mailByEntryId.Remove remEid
-                    RemoveFromMailIndex remRec, remEid
-                End If
-                m_mailRecords.Remove keys(i)
-            End If
-        Next i
-    End If
-
-    ' Write manifest.tsv for future fast loading
-    If manifestLines.Count > 0 Then
-        Dim f As Long: f = FreeFile
-        Open manifestPath For Output As #f
-        For i = 1 To manifestLines.Count
-            Print #f, manifestLines(i)
-        Next i
-        Close #f
-        m_manifestMod = FileDateTime(manifestPath)
-    End If
-
-    LogProfile "ScanMailDirAndBuildManifest: " & Format$(Timer - t0, "0.000") & "s (" & m_mailRecords.Count & " records, manifest written)"
-    On Error GoTo 0
-End Sub
-
-' Dir$-based mail scanner (two-pass: collect folders, then process meta.json)
-Private Sub ScanMailDirRecursive(rootPath As String, seenPaths As Object, manifestLines As Collection)
-    On Error Resume Next
-    Dim folders As New Collection
-    Dim d As String: d = Dir$(rootPath & "\*", vbDirectory)
-    Do While Len(d) > 0
-        If d <> "." And d <> ".." Then
-            Dim fullPath As String: fullPath = rootPath & "\" & d
-            If (GetAttr(fullPath) And vbDirectory) = vbDirectory Then
-                folders.Add fullPath
-            End If
-        End If
-        d = Dir$
-    Loop
-
-    Dim i As Long
-    For i = 1 To folders.Count
-        Dim fp As String: fp = folders(i)
-        Dim metaPath As String: metaPath = fp & "\meta.json"
-        If Len(Dir$(metaPath)) > 0 Then
-            seenPaths(fp) = True
-            If Not m_mailRecords.Exists(fp) Then
-                Dim json As String: json = FolioLib.ReadTextFile(metaPath)
-                If Len(json) > 0 Then
-                    Dim rec As Object: Set rec = Nothing
-                    Set rec = FolioLib.ParseMailMeta(json)
-                    If Not rec Is Nothing Then
-                        Dim bp As String: bp = FolioLib.DictStr(rec, "body_path")
-                        If Len(bp) > 0 And Left$(bp, Len(fp)) <> fp Then
-                            FolioLib.DictPut rec, "body_path", fp & "\" & bp
-                        End If
-                        Dim mp2 As String: mp2 = FolioLib.DictStr(rec, "msg_path")
-                        If Len(mp2) > 0 And Left$(mp2, Len(fp)) <> fp Then
-                            FolioLib.DictPut rec, "msg_path", fp & "\" & mp2
-                        End If
-                        ResolveAttachmentPaths rec, fp
-                        FolioLib.DictPut rec, "_mail_folder", fp
-
-                        Set m_mailRecords(fp) = rec
-                        Dim eid As String: eid = FolioLib.DictStr(rec, "entry_id")
-                        If Len(eid) > 0 Then
-                            Set m_mailByEntryId(eid) = rec
-                            AddToMailIndex rec, eid
-                            m_mailAdded(eid) = FolioLib.DictStr(rec, "subject") & _
-                                " - " & FolioLib.DictStr(rec, "sender_email")
-                        End If
-
-                        ' Build manifest line
-                        Dim attStr As String: attStr = ""
-                        If rec.Exists("attachment_paths") Then
-                            If IsObject(rec("attachment_paths")) Then
-                                Dim attDict As Object: Set attDict = rec("attachment_paths")
-                                If attDict.Count > 0 Then
-                                    Dim attKeys As Variant: attKeys = attDict.keys
-                                    Dim attParts() As String: ReDim attParts(0 To UBound(attKeys))
-                                    Dim a As Long
-                                    For a = 0 To UBound(attKeys): attParts(a) = CStr(attKeys(a)): Next a
-                                    attStr = Join(attParts, "|")
-                                End If
-                            End If
-                        End If
-                        manifestLines.Add eid & vbTab & _
-                            FolioLib.DictStr(rec, "sender_email") & vbTab & _
-                            FolioLib.DictStr(rec, "sender_name") & vbTab & _
-                            FolioLib.DictStr(rec, "subject") & vbTab & _
-                            FolioLib.DictStr(rec, "received_at") & vbTab & _
-                            FolioLib.DictStr(rec, "folder_path") & vbTab & _
-                            FolioLib.DictStr(rec, "body_path") & vbTab & _
-                            FolioLib.DictStr(rec, "msg_path") & vbTab & _
-                            attStr & vbTab & fp
-                    End If
-                End If
-            End If
-        Else
-            ' Subdirectory without meta.json — recurse into it
-            ScanMailDirRecursive fp, seenPaths, manifestLines
-        End If
-    Next i
     On Error GoTo 0
 End Sub
 
@@ -350,7 +201,7 @@ Public Sub SetMailMatchConfig(field As String, mode As String)
 End Sub
 
 Private Sub RebuildMailIndex()
-    Set m_mailIndex = FolioLib.NewDict()
+    Set m_mailIndex = CaseDeskLib.NewDict()
     If m_mailRecords Is Nothing Then Exit Sub
     If Len(m_mailIndexField) = 0 Then Exit Sub
     If m_mailRecords.Count = 0 Then Exit Sub
@@ -358,7 +209,7 @@ Private Sub RebuildMailIndex()
     Dim i As Long
     For i = 0 To UBound(items)
         Dim rec As Object: Set rec = items(i)
-        Dim eid As String: eid = FolioLib.DictStr(rec, "entry_id")
+        Dim eid As String: eid = CaseDeskLib.DictStr(rec, "entry_id")
         If Len(eid) > 0 Then AddToMailIndex rec, eid
     Next i
 End Sub
@@ -376,7 +227,7 @@ Private Sub AddToMailIndex(rec As Object, entryId As String)
     Else
         key = LCase$(fv)
     End If
-    If Not m_mailIndex.Exists(key) Then m_mailIndex.Add key, FolioLib.NewDict()
+    If Not m_mailIndex.Exists(key) Then m_mailIndex.Add key, CaseDeskLib.NewDict()
     Dim inner As Object: Set inner = m_mailIndex(key)
     Set inner(entryId) = rec
 End Sub
@@ -401,183 +252,145 @@ Private Sub RemoveFromMailIndex(rec As Object, entryId As String)
     End If
 End Sub
 
-Private Sub ResolveAttachmentPaths(rec As Object, folderPath As String)
-    On Error Resume Next
-    If Not rec.Exists("attachments") Then Exit Sub
-    If Not IsObject(rec("attachments")) Then Exit Sub
-    Dim atts As Object: Set atts = rec("attachments")
-    If TypeName(atts) <> "Collection" Then Exit Sub
-    Dim resolved As Object: Set resolved = FolioLib.NewDict()
-    Dim i As Long
-    For i = 1 To atts.Count
-        Dim fn As String: fn = CStr(atts(i))
-        If Len(fn) > 0 Then resolved.Add folderPath & "\" & fn, fn
-    Next i
-    FolioLib.DictPut rec, "attachment_paths", resolved
-    On Error GoTo 0
-End Sub
-
 Private Function GetDomain(email As String) As String
     Dim pos As Long: pos = InStr(email, "@")
     If pos > 0 Then GetDomain = Mid$(email, pos + 1) Else GetDomain = email
 End Function
 
 Public Function GetMailRecords() As Object
-    If m_mailRecords Is Nothing Then Set m_mailRecords = FolioLib.NewDict()
+    If m_mailRecords Is Nothing Then Set m_mailRecords = CaseDeskLib.NewDict()
     Set GetMailRecords = m_mailRecords
 End Function
 
 Public Function GetCaseNames() As Object
-    If m_caseNames Is Nothing Then Set m_caseNames = FolioLib.NewDict()
+    If m_caseNames Is Nothing Then Set m_caseNames = CaseDeskLib.NewDict()
     Set GetCaseNames = m_caseNames
 End Function
 
 Public Function GetMailByEntryId() As Object
-    If m_mailByEntryId Is Nothing Then Set m_mailByEntryId = FolioLib.NewDict()
+    If m_mailByEntryId Is Nothing Then Set m_mailByEntryId = CaseDeskLib.NewDict()
     Set GetMailByEntryId = m_mailByEntryId
 End Function
 
 Public Function GetMailIndex() As Object
-    If m_mailIndex Is Nothing Then Set m_mailIndex = FolioLib.NewDict()
+    If m_mailIndex Is Nothing Then Set m_mailIndex = CaseDeskLib.NewDict()
     Set GetMailIndex = m_mailIndex
 End Function
 
 Public Function GetMailAdded() As Object
-    If m_mailAdded Is Nothing Then Set m_mailAdded = FolioLib.NewDict()
+    If m_mailAdded Is Nothing Then Set m_mailAdded = CaseDeskLib.NewDict()
     Set GetMailAdded = m_mailAdded
 End Function
 
 Public Function GetMailRemoved() As Object
-    If m_mailRemoved Is Nothing Then Set m_mailRemoved = FolioLib.NewDict()
+    If m_mailRemoved Is Nothing Then Set m_mailRemoved = CaseDeskLib.NewDict()
     Set GetMailRemoved = m_mailRemoved
 End Function
 
 ' ============================================================================
-' BE: Case folder scanning
+' BE: Case data from manifest.csv (generated by watchbox)
+' Format: item_id,file_name,file_path,folder_path,relative_path,file_size,modified_at
 ' ============================================================================
 
-Public Function RefreshCaseNames(rootPath As String) As Boolean
-    Dim eh As New ErrorHandler: eh.Enter "FolioWorker", "RefreshCaseNames"
+Public Function RefreshCaseData(rootPath As String) As Boolean
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskWorker", "RefreshCaseData"
     On Error GoTo ErrHandler
-    RefreshCaseNames = False
-    If Not FolioLib.FolderExists(rootPath) Then eh.OK: Exit Function
+    RefreshCaseData = False
 
-    ' Quick check: skip if root folder unchanged
-    Dim curCaseMod As Date: curCaseMod = FileDateTime(rootPath)
-    If m_caseDiffReady And curCaseMod = m_caseRootMod Then eh.OK: Exit Function
-    m_caseRootMod = curCaseMod
+    Dim manifestPath As String: manifestPath = rootPath & "\manifest.csv"
+    If Len(Dir$(manifestPath)) = 0 Then eh.OK: Exit Function
 
-    If m_caseNames Is Nothing Then Set m_caseNames = FolioLib.NewDict()
+    Dim curMod As Date: curMod = FileDateTime(manifestPath)
+    If m_caseDiffReady And curMod = m_caseManifestMod Then eh.OK: Exit Function
+    m_caseManifestMod = curMod
 
-    Dim currentNames As Object: Set currentNames = FolioLib.NewDict()
-    Dim d As String: d = Dir$(rootPath & "\*", vbDirectory)
-    Do While Len(d) > 0
-        If d <> "." And d <> ".." Then
-            If (GetAttr(rootPath & "\" & d) And vbDirectory) = vbDirectory Then
-                currentNames(d) = True
-            End If
+    ' Read manifest.csv
+    Dim content As String: content = CaseDeskLib.ReadTextFile(manifestPath)
+    If Len(content) = 0 Then eh.OK: Exit Function
+
+    Dim prevNames As Object: Set prevNames = m_caseNames
+    Set m_caseNames = CaseDeskLib.NewDict()
+    Set m_caseFiles = CaseDeskLib.NewDict()
+    Set m_caseAdded = CaseDeskLib.NewDict()
+    Set m_caseRemoved = CaseDeskLib.NewDict()
+
+    Dim lines() As String: lines = Split(content, vbLf)
+    Dim i As Long
+    For i = 0 To UBound(lines)
+        Dim line As String: line = lines(i)
+        If Len(line) = 0 Then GoTo NextCaseLine
+        If Left$(line, 7) = "item_id" Then GoTo NextCaseLine
+        Dim cols() As String: cols = Split(line, ",")
+        If UBound(cols) < 6 Then GoTo NextCaseLine
+
+        Dim itemId As String: itemId = cols(0)
+        If Len(itemId) = 0 Then GoTo NextCaseLine
+
+        ' Extract case name from relative_path (first path segment)
+        Dim relPath As String: relPath = cols(4)
+        Dim caseName As String
+        Dim sepPos As Long: sepPos = InStr(relPath, "\")
+        If sepPos > 0 Then
+            caseName = Left$(relPath, sepPos - 1)
+        Else
+            caseName = ""
         End If
-        d = Dir$
-    Loop
 
-    Set m_caseAdded = FolioLib.NewDict()
-    Set m_caseRemoved = FolioLib.NewDict()
-    Dim k As Variant
-    For Each k In currentNames.keys
-        If Not m_caseNames.Exists(k) Then m_caseAdded(CStr(k)) = True
-    Next k
-    For Each k In m_caseNames.keys
-        If Not currentNames.Exists(k) Then m_caseRemoved(CStr(k)) = True
-    Next k
-    Set m_caseNames = currentNames
+        ' Track case names
+        If Len(caseName) > 0 And Not m_caseNames.Exists(caseName) Then
+            m_caseNames(caseName) = True
+        End If
 
-    If Not m_caseDiffReady Then
-        Set m_caseAdded = FolioLib.NewDict()
-        Set m_caseRemoved = FolioLib.NewDict()
-        m_caseDiffReady = True
+        ' Store file record
+        Dim rec As Object: Set rec = CaseDeskLib.NewDict()
+        rec.Add "item_id", itemId
+        rec.Add "file_name", cols(1)
+        rec.Add "file_path", cols(2)
+        rec.Add "folder_path", cols(3)
+        rec.Add "relative_path", relPath
+        rec.Add "file_size", cols(5)
+        rec.Add "modified_at", cols(6)
+        rec.Add "case_id", caseName
+        Set m_caseFiles(itemId) = rec
+NextCaseLine:
+    Next i
+
+    ' Compute case name diffs (skip on first run to avoid false positives)
+    If m_caseDiffReady And Not prevNames Is Nothing Then
+        Dim k As Variant
+        For Each k In m_caseNames.keys
+            If Not prevNames.Exists(k) Then m_caseAdded(CStr(k)) = True
+        Next k
+        For Each k In prevNames.keys
+            If Not m_caseNames.Exists(k) Then m_caseRemoved(CStr(k)) = True
+        Next k
     End If
+    m_caseDiffReady = True
 
-    RefreshCaseNames = (m_caseAdded.Count > 0 Or m_caseRemoved.Count > 0)
+    m_caseFilesDirty = True
+    RefreshCaseData = True
+    LogProfile "RefreshCaseData: " & m_caseFiles.Count & " files, " & m_caseNames.Count & " cases"
     eh.OK: Exit Function
 ErrHandler: eh.Catch
 End Function
 
-' Scan files for ALL case folders. Runs as part of TASK_CASES.
-Public Function RefreshCaseFiles(rootPath As String) As Boolean
-    On Error Resume Next
-    RefreshCaseFiles = False
-    If m_caseNames Is Nothing Then Exit Function
-    If m_caseNames.Count = 0 Then Exit Function
-
-    Dim t0 As Single: t0 = Timer
-    Dim newFiles As Object: Set newFiles = FolioLib.NewDict()
-    Dim caseKeys As Variant: caseKeys = m_caseNames.keys
-    Dim i As Long, seq As Long: seq = 0
-    For i = 0 To UBound(caseKeys)
-        Dim caseName As String: caseName = CStr(caseKeys(i))
-        Dim casePath As String: casePath = rootPath & "\" & caseName
-        Dim before As Long: before = seq
-        ScanCaseDirToDict casePath, caseName, casePath, newFiles, seq
-    Next i
-    LogProfile "RefreshCaseFiles: " & newFiles.Count & " files in " & Format$(Timer - t0, "0.000") & "s"
-
-    Dim prevCount As Long: prevCount = 0
-    If Not m_caseFiles Is Nothing Then prevCount = m_caseFiles.Count
-    Set m_caseFiles = newFiles
-    If newFiles.Count <> prevCount Then
-        m_caseFilesDirty = True
-        RefreshCaseFiles = True
-    End If
-    On Error GoTo 0
-End Function
-
-' Like ScanCaseDir but appends directly to a Dict (key = seq number, value = tab line)
-Private Sub ScanCaseDirToDict(ByVal folderPath As String, caseId As String, rootPath As String, files As Object, seq As Long)
-    On Error Resume Next
-    Dim entries() As String, cnt As Long: cnt = 0
-    Dim d As String: d = Dir$(folderPath & "\*", vbDirectory Or vbNormal)
-    Do While Len(d) > 0
-        If d <> "." And d <> ".." Then
-            cnt = cnt + 1
-            If cnt = 1 Then ReDim entries(0 To 0) Else ReDim Preserve entries(0 To cnt - 1)
-            entries(cnt - 1) = d
-        End If
-        d = Dir$
-    Loop
-    Dim i As Long
-    For i = 0 To cnt - 1
-        Dim fullPath As String: fullPath = folderPath & "\" & entries(i)
-        Dim attr As Long: attr = GetAttr(fullPath)
-        If (attr And vbDirectory) = vbDirectory Then
-            ScanCaseDirToDict fullPath, caseId, rootPath, files, seq
-        Else
-            seq = seq + 1
-            files(CStr(seq)) = caseId & vbTab & entries(i) & vbTab & _
-                fullPath & vbTab & folderPath & vbTab & _
-                Mid$(fullPath, Len(rootPath) + 2) & vbTab & _
-                CStr(FileLen(fullPath)) & vbTab & CStr(FileDateTime(fullPath))
-        End If
-    Next i
-    On Error GoTo 0
-End Sub
-
 Public Function GetCaseAdded() As Object
-    If m_caseAdded Is Nothing Then Set m_caseAdded = FolioLib.NewDict()
+    If m_caseAdded Is Nothing Then Set m_caseAdded = CaseDeskLib.NewDict()
     Set GetCaseAdded = m_caseAdded
 End Function
 
 Public Function GetCaseRemoved() As Object
-    If m_caseRemoved Is Nothing Then Set m_caseRemoved = FolioLib.NewDict()
+    If m_caseRemoved Is Nothing Then Set m_caseRemoved = CaseDeskLib.NewDict()
     Set GetCaseRemoved = m_caseRemoved
 End Function
 
 ' Clear diff dictionaries after they have been written to FE sheets
 ' Prevents stale diffs from being re-written when only one scan type triggers a signal bump
 Public Sub ClearDiffs()
-    Set m_mailAdded = FolioLib.NewDict()
-    Set m_mailRemoved = FolioLib.NewDict()
-    Set m_caseAdded = FolioLib.NewDict()
-    Set m_caseRemoved = FolioLib.NewDict()
+    Set m_mailAdded = CaseDeskLib.NewDict()
+    Set m_mailRemoved = CaseDeskLib.NewDict()
+    Set m_caseAdded = CaseDeskLib.NewDict()
+    Set m_caseRemoved = CaseDeskLib.NewDict()
 End Sub
 
 ' ============================================================================
@@ -587,7 +400,7 @@ End Sub
 Public Sub WorkerEntryPoint(mailFolder As String, caseRoot As String, _
                             matchField As String, matchMode As String, _
                             feWorkbook As Object)
-    Dim eh As New ErrorHandler: eh.Enter "FolioWorker", "EntryPoint"
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskWorker", "EntryPoint"
     On Error GoTo ErrHandler
 
     g_mailFolder = mailFolder
@@ -598,7 +411,7 @@ Public Sub WorkerEntryPoint(mailFolder As String, caseRoot As String, _
 
     g_signalVersion = 0
     g_active = True
-    Application.OnTime Now, "FolioWorker.WorkerInitialScan"
+    Application.OnTime Now, "CaseDeskWorker.WorkerInitialScan"
 
     eh.OK: Exit Sub
 ErrHandler: eh.Catch
@@ -615,8 +428,7 @@ Public Sub WorkerInitialScan()
     Dim t0 As Single: t0 = Timer
     If Len(g_mailFolder) > 0 Then RefreshMailData g_mailFolder
     Dim t1 As Single: t1 = Timer
-    If Len(g_caseRoot) > 0 Then RefreshCaseNames g_caseRoot
-    If Len(g_caseRoot) > 0 Then RefreshCaseFiles g_caseRoot
+    If Len(g_caseRoot) > 0 Then RefreshCaseData g_caseRoot
     Dim t2 As Single: t2 = Timer
 
     ' Write all data to FE sheets
@@ -667,8 +479,7 @@ Public Sub DoScanChunk()
                 End If
             Case TASK_CASES
                 If Len(g_caseRoot) > 0 Then
-                    If RefreshCaseNames(g_caseRoot) Then g_casesDirty = True
-                    RefreshCaseFiles g_caseRoot
+                    If RefreshCaseData(g_caseRoot) Then g_casesDirty = True
                 End If
             Case TASK_WRITE
                 If g_mailDirty Or g_casesDirty Or m_caseFilesDirty Then
@@ -690,7 +501,7 @@ Public Sub DoScanChunk()
     ' Schedule Yield (returns control to message loop, then next chunk)
     If g_active Then
         g_nextYieldAt = Now
-        Application.OnTime g_nextYieldAt, "FolioWorker.YieldCallback"
+        Application.OnTime g_nextYieldAt, "CaseDeskWorker.YieldCallback"
         g_scheduled = True
     End If
     On Error GoTo 0
@@ -709,7 +520,7 @@ Private Sub ScheduleNextChunk()
     If g_scheduled Then Exit Sub
     On Error Resume Next
     Dim nextAt As Date: nextAt = Now + TimeSerial(0, 0, 1)
-    Application.OnTime nextAt, "FolioWorker.DoScanChunk"
+    Application.OnTime nextAt, "CaseDeskWorker.DoScanChunk"
     g_scheduled = True
     If Err.Number <> 0 Then g_scheduled = False: Err.Clear
     On Error GoTo 0
@@ -721,7 +532,7 @@ End Sub
 
 Public Sub UpdateConfig(mailFolder As String, caseRoot As String, _
                         matchField As String, matchMode As String)
-    Dim eh As New ErrorHandler: eh.Enter "FolioWorker", "UpdateConfig"
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskWorker", "UpdateConfig"
     On Error GoTo ErrHandler
 
     g_mailFolder = mailFolder
@@ -745,29 +556,6 @@ End Sub
 ' ============================================================================
 
 
-Private Sub ScanCaseDir(ByVal folderPath As String, caseId As String, rootPath As String, lines As Collection)
-    On Error Resume Next
-    Dim entries As New Collection
-    Dim d As String: d = Dir$(folderPath & "\*", vbDirectory Or vbNormal)
-    Do While Len(d) > 0
-        If d <> "." And d <> ".." Then entries.Add d
-        d = Dir$
-    Loop
-    Dim i As Long
-    For i = 1 To entries.Count
-        Dim fullPath As String: fullPath = folderPath & "\" & entries(i)
-        Dim attr As Long: attr = GetAttr(fullPath)
-        If (attr And vbDirectory) = vbDirectory Then
-            ScanCaseDir fullPath, caseId, rootPath, lines
-        Else
-            lines.Add caseId & vbTab & entries(i) & vbTab & _
-                fullPath & vbTab & folderPath & vbTab & _
-                Mid$(fullPath, Len(rootPath) + 2) & vbTab & _
-                CStr(FileLen(fullPath)) & vbTab & CStr(FileDateTime(fullPath))
-        End If
-    Next i
-    On Error GoTo 0
-End Sub
 
 ' ============================================================================
 ' Stop
@@ -793,7 +581,7 @@ Private Function FESheet(shName As String) As Object
 End Function
 
 Private Sub WriteMailToFE()
-    Dim ws As Object: Set ws = FESheet("_folio_mail")
+    Dim ws As Object: Set ws = FESheet("_casedesk_mail")
     If ws Is Nothing Then Exit Sub
     ws.UsedRange.ClearContents
 
@@ -803,18 +591,18 @@ Private Sub WriteMailToFE()
 
     Dim keys As Variant: keys = records.keys
     Dim n As Long: n = UBound(keys) + 1
-    Dim data() As Variant: ReDim data(1 To n, 1 To 10)
+    Dim data() As Variant: ReDim data(1 To n, 1 To 11)
     Dim i As Long
     For i = 0 To UBound(keys)
         Dim rec As Object: Set rec = records(keys(i))
-        data(i + 1, 1) = FolioLib.DictStr(rec, "entry_id")
-        data(i + 1, 2) = FolioLib.DictStr(rec, "sender_email")
-        data(i + 1, 3) = FolioLib.DictStr(rec, "sender_name")
-        data(i + 1, 4) = FolioLib.DictStr(rec, "subject")
-        data(i + 1, 5) = FolioLib.DictStr(rec, "received_at")
-        data(i + 1, 6) = FolioLib.DictStr(rec, "folder_path")
-        data(i + 1, 7) = FolioLib.DictStr(rec, "body_path")
-        data(i + 1, 8) = FolioLib.DictStr(rec, "msg_path")
+        data(i + 1, 1) = CaseDeskLib.DictStr(rec, "entry_id")
+        data(i + 1, 2) = CaseDeskLib.DictStr(rec, "sender_email")
+        data(i + 1, 3) = CaseDeskLib.DictStr(rec, "sender_name")
+        data(i + 1, 4) = CaseDeskLib.DictStr(rec, "subject")
+        data(i + 1, 5) = CaseDeskLib.DictStr(rec, "received_at")
+        data(i + 1, 6) = CaseDeskLib.DictStr(rec, "folder_path")
+        data(i + 1, 7) = CaseDeskLib.DictStr(rec, "body_path")
+        data(i + 1, 8) = CaseDeskLib.DictStr(rec, "msg_path")
         Dim attStr As String: attStr = ""
         If rec.Exists("attachment_paths") Then
             If IsObject(rec("attachment_paths")) Then
@@ -829,13 +617,14 @@ Private Sub WriteMailToFE()
             End If
         End If
         data(i + 1, 9) = attStr
-        data(i + 1, 10) = FolioLib.DictStr(rec, "_mail_folder")
+        data(i + 1, 10) = CaseDeskLib.DictStr(rec, "_mail_folder")
+        data(i + 1, 11) = CaseDeskLib.DictStr(rec, "body_text")
     Next i
-    ws.Range("A1").Resize(n, 10).Value = data
+    ws.Range("A1").Resize(n, 11).Value = data
 End Sub
 
 Private Sub WriteMailIndexToFE()
-    Dim ws As Object: Set ws = FESheet("_folio_mail_idx")
+    Dim ws As Object: Set ws = FESheet("_casedesk_mail_idx")
     If ws Is Nothing Then Exit Sub
     ws.UsedRange.ClearContents
 
@@ -865,7 +654,7 @@ Private Sub WriteMailIndexToFE()
 End Sub
 
 Private Sub WriteCasesToFE()
-    Dim ws As Object: Set ws = FESheet("_folio_cases")
+    Dim ws As Object: Set ws = FESheet("_casedesk_cases")
     If ws Is Nothing Then Exit Sub
     ws.UsedRange.ClearContents
 
@@ -884,23 +673,27 @@ End Sub
 
 Private Sub WriteCaseFilesToFE()
     On Error Resume Next
-    Dim ws As Object: Set ws = FESheet("_folio_files")
+    Dim ws As Object: Set ws = FESheet("_casedesk_files")
     If ws Is Nothing Then Exit Sub
     ws.UsedRange.ClearContents
 
     If m_caseFiles Is Nothing Then m_caseFilesDirty = False: Exit Sub
     If m_caseFiles.Count = 0 Then m_caseFilesDirty = False: Exit Sub
 
+    ' Columns: case_id, file_name, file_path, folder_path, relative_path, file_size, modified_at
     Dim keys As Variant: keys = m_caseFiles.keys
     Dim n As Long: n = m_caseFiles.Count
     Dim data() As Variant: ReDim data(1 To n, 1 To 7)
     Dim i As Long
     For i = 0 To UBound(keys)
-        Dim parts() As String: parts = Split(CStr(m_caseFiles(keys(i))), vbTab)
-        If UBound(parts) >= 6 Then
-            Dim c As Long
-            For c = 0 To 6: data(i + 1, c + 1) = parts(c): Next c
-        End If
+        Dim rec As Object: Set rec = m_caseFiles(keys(i))
+        data(i + 1, 1) = CaseDeskLib.DictStr(rec, "case_id")
+        data(i + 1, 2) = CaseDeskLib.DictStr(rec, "file_name")
+        data(i + 1, 3) = CaseDeskLib.DictStr(rec, "file_path")
+        data(i + 1, 4) = CaseDeskLib.DictStr(rec, "folder_path")
+        data(i + 1, 5) = CaseDeskLib.DictStr(rec, "relative_path")
+        data(i + 1, 6) = CaseDeskLib.DictStr(rec, "file_size")
+        data(i + 1, 7) = CaseDeskLib.DictStr(rec, "modified_at")
     Next i
     ws.Range("A1").Resize(n, 7).Value = data
     m_caseFilesDirty = False
@@ -908,7 +701,7 @@ Private Sub WriteCaseFilesToFE()
 End Sub
 
 Private Sub WriteDiffToFE()
-    Dim ws As Object: Set ws = FESheet("_folio_diff")
+    Dim ws As Object: Set ws = FESheet("_casedesk_diff")
     If ws Is Nothing Then Exit Sub
     ws.UsedRange.ClearContents
 
@@ -960,13 +753,13 @@ End Sub
 
 
 Private Sub WriteVersionToFE(ver As Long)
-    Dim ws As Object: Set ws = FESheet("_folio_signal")
+    Dim ws As Object: Set ws = FESheet("_casedesk_signal")
     If ws Is Nothing Then Exit Sub
     ws.Range("B1").Value = ver
 End Sub
 
 Private Sub WriteSignalToFE(ver As Long, timing As String)
-    Dim ws As Object: Set ws = FESheet("_folio_signal")
+    Dim ws As Object: Set ws = FESheet("_casedesk_signal")
     If ws Is Nothing Then Exit Sub
     ws.Range("A1").Value2 = Format$(Now, "hh:nn:ss") & " "
     ws.Range("B1").Value = ver
