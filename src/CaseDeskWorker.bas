@@ -48,11 +48,14 @@ Private m_caseDiffReady As Boolean
 Private m_caseManifestMod As Date    ' Last known case manifest.csv mod time
 Private m_caseFiles As Object       ' Dict: item_id -> record dict
 Private m_caseFilesDirty As Boolean
+Private m_cachePath As String       ' Cache root (passed from FE)
 
 Private Sub LogProfile(msg As String)
     On Error Resume Next
+    If Len(m_cachePath) = 0 Then Exit Sub
+    CaseDeskLib.EnsureFolder m_cachePath
     Dim f As Long: f = FreeFile
-    Open ThisWorkbook.path & "\.casedesk_cache\_profile.log" For Append As #f
+    Open m_cachePath & "\_profile.log" For Append As #f
     Print #f, Format$(Now, "hh:nn:ss") & " " & msg
     Close #f
     On Error GoTo 0
@@ -87,8 +90,8 @@ Public Function RefreshMailData(folderPath As String) As Boolean
     On Error GoTo ErrHandler
     RefreshMailData = False
 
-    Dim manifestPath As String: manifestPath = folderPath & "\manifest.csv"
-    If Len(Dir$(manifestPath)) = 0 Then eh.OK: Exit Function
+    Dim manifestPath As String: manifestPath = ResolveManifestPath(folderPath)
+    If Len(manifestPath) = 0 Then eh.OK: Exit Function
 
     Dim curMod As Date: curMod = FileDateTime(manifestPath)
     If m_mailDiffReady And curMod = m_manifestMod Then eh.OK: Exit Function
@@ -252,6 +255,15 @@ Private Sub RemoveFromMailIndex(rec As Object, entryId As String)
     End If
 End Sub
 
+Private Function ResolveManifestPath(folderPath As String) As String
+    ResolveManifestPath = ""
+    Dim p As String
+    p = folderPath & "\.manifest.csv"
+    If Len(Dir$(p)) > 0 Then ResolveManifestPath = p: Exit Function
+    p = folderPath & "\manifest.csv"
+    If Len(Dir$(p)) > 0 Then ResolveManifestPath = p: Exit Function
+End Function
+
 Private Function GetDomain(email As String) As String
     Dim pos As Long: pos = InStr(email, "@")
     If pos > 0 Then GetDomain = Mid$(email, pos + 1) Else GetDomain = email
@@ -297,8 +309,8 @@ Public Function RefreshCaseData(rootPath As String) As Boolean
     On Error GoTo ErrHandler
     RefreshCaseData = False
 
-    Dim manifestPath As String: manifestPath = rootPath & "\manifest.csv"
-    If Len(Dir$(manifestPath)) = 0 Then eh.OK: Exit Function
+    Dim manifestPath As String: manifestPath = ResolveManifestPath(rootPath)
+    If Len(manifestPath) = 0 Then eh.OK: Exit Function
 
     Dim curMod As Date: curMod = FileDateTime(manifestPath)
     If m_caseDiffReady And curMod = m_caseManifestMod Then eh.OK: Exit Function
@@ -399,13 +411,14 @@ End Sub
 
 Public Sub WorkerEntryPoint(mailFolder As String, caseRoot As String, _
                             matchField As String, matchMode As String, _
-                            feWorkbook As Object)
+                            feWorkbook As Object, cachePath As String)
     Dim eh As New ErrorHandler: eh.Enter "CaseDeskWorker", "EntryPoint"
     On Error GoTo ErrHandler
 
     g_mailFolder = mailFolder
     g_caseRoot = caseRoot
     Set g_feWb = feWorkbook
+    m_cachePath = cachePath
     SetMailMatchConfig matchField, matchMode
     Application.EnableEvents = True
 

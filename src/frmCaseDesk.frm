@@ -485,13 +485,17 @@ End Sub
 Private Sub ResizeFrameEditors(fra As MSForms.Frame, frameW As Single)
     On Error Resume Next
     Dim sbW As Single: sbW = 18
-    Dim editorW As Single: editorW = frameW - 8 - sbW - 8
+    Dim needScroll As Boolean: needScroll = (fra.ScrollHeight > fra.Height)
+    Dim editorW As Single: editorW = fra.InsideWidth - 8 - IIf(needScroll, sbW, 0) - 4
     Dim ci As Long
     For ci = 0 To fra.Controls.Count - 1
         Dim ctl As MSForms.Control: Set ctl = fra.Controls(ci)
         If TypeName(ctl) = "TextBox" Then
+            ' compact fields (number/date/currency) keep fixed width
+            If ctl.Width <= 150 And ctl.TextAlign = fmTextAlignRight Then GoTo NextCtl
             ctl.Width = editorW
         End If
+NextCtl:
     Next ci
     On Error GoTo 0
 End Sub
@@ -568,23 +572,7 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Function GetDataWorkbook() As Workbook
-    Dim excelPath As String: excelPath = CaseDeskLib.GetStr("excel_path")
-    If Len(excelPath) = 0 Then Exit Function
-    If Dir$(excelPath) = "" Then Exit Function
-
-    ' Check if already open
-    Dim fileName As String: fileName = Dir$(excelPath)
-    Dim wb As Workbook
-    For Each wb In Application.Workbooks
-        If LCase$(wb.Name) = LCase$(fileName) Then
-            Set GetDataWorkbook = wb: Exit Function
-        End If
-    Next wb
-
-    ' Open it
-    On Error Resume Next
-    Set GetDataWorkbook = Application.Workbooks.Open(excelPath, ReadOnly:=False, UpdateLinks:=0)
-    On Error GoTo 0
+    Set GetDataWorkbook = CaseDeskMain.g_dataWb
 End Function
 
 Private Sub SwitchSource(sourceName As String)
@@ -623,6 +611,7 @@ Private Sub SwitchSource(sourceName As String)
     BuildFieldEditors
     BuildJoinedTabs
     m_loading = False
+    RepositionControls
     UpdateRecordList
     LoadChangeLog
     m_initialLoadDone = True
@@ -714,7 +703,7 @@ Private Sub AddFieldEditorsToPage(pg As MSForms.Page, fields As Collection, keyC
     Dim labelW As Single: labelW = 80
     Dim sbW As Single: sbW = 18
     Dim editorLeft As Single: editorLeft = 8
-    Dim editorW As Single: editorW = pw - editorLeft - sbW - 8
+    Dim editorW As Single: editorW = fraScroll.InsideWidth - editorLeft - sbW - 4
 
     Dim i As Long
     Dim HIDE_SUFFIX As String: HIDE_SUFFIX = "_" & ChrW$(38750) & ChrW$(34920) & ChrW$(31034)
@@ -735,8 +724,8 @@ Private Sub AddFieldEditorsToPage(pg As MSForms.Page, fields As Collection, keyC
         lbl.ForeColor = RGB(100, 100, 100)
 
         Dim fType As String: fType = CaseDeskLib.GetFieldStr(m_currentSource, fn, "type", "text")
-        Dim isNumber As Boolean: isNumber = (fType = "number")
-        Dim txtW As Single: txtW = IIf(isNumber, 120, editorW)
+        Dim isCompact As Boolean: isCompact = (fType = "number" Or fType = "date" Or fType = "currency")
+        Dim txtW As Single: txtW = IIf(isCompact, 150, editorW)
         Dim rowH As Single: rowH = IIf(isMultiline, 54, 22)
         Dim txt As MSForms.TextBox
         Set txt = fraScroll.Controls.Add("Forms.TextBox.1", "txt_" & fn)
@@ -748,7 +737,7 @@ Private Sub AddFieldEditorsToPage(pg As MSForms.Page, fields As Collection, keyC
         txt.Locked = Not isEditable
         If Not isEditable Then txt.BackColor = &HF8F8F8
         If isMultiline Then txt.MultiLine = True: txt.ScrollBars = fmScrollBarsVertical: txt.WordWrap = True
-        If isNumber Then txt.TextAlign = fmTextAlignRight
+        If isCompact Then txt.TextAlign = fmTextAlignRight
         ' IME mode based on field type
         Select Case fType
             Case "number", "date", "currency": txt.IMEMode = fmIMEModeDisable
@@ -955,7 +944,7 @@ End Sub
 ' Detail Update
 ' ============================================================================
 
-Private Sub CommitPendingEdits()
+Public Sub CommitPendingEdits()
     If m_fieldEditors Is Nothing Then Exit Sub
     Dim i As Long
     For i = 1 To m_fieldEditors.Count
@@ -1219,15 +1208,15 @@ End Function
 ' ============================================================================
 
 Public Sub OnFieldEdited(fieldName As String, newVal As String)
-    ' Called on every keystroke — write to table only, no logging
     If m_loading Then Exit Sub
-    If m_currentRecIdx > 0 Then
-        CaseDeskData.WriteTableCell m_currentTable, m_currentRecIdx, fieldName, newVal
-    End If
+    If m_currentRecIdx < 1 Then Exit Sub
+    Application.EnableEvents = False
+    CaseDeskData.WriteTableCell m_currentTable, m_currentRecIdx, fieldName, newVal
+    Application.EnableEvents = True
 End Sub
 
 Public Sub OnFieldChanged(fieldName As String, oldVal As String, newVal As String, origin As String)
-    ' Called once per edit session (on blur for local, on refresh for external)
+    ' Called once per edit session (on commit for local, on refresh for external)
     If m_loading Then Exit Sub
     Dim keyCol As String: keyCol = CaseDeskLib.GetSourceStr(m_currentSource, "key_column")
     Dim keyVal As String

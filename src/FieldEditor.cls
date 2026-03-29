@@ -94,12 +94,10 @@ End Function
 
 Private Sub m_txt_Change()
     If m_suppressing Then Exit Sub
-    If m_form Is Nothing Then Exit Sub
     Dim newVal As String: newVal = ParseRawValue()
     If newVal <> m_prevValue Then
         m_prevValue = newVal
-        ' Write to table immediately but don't log yet (log on Exit)
-        If Not m_isReadOnly Then
+        If Not m_isReadOnly And Not m_form Is Nothing Then
             m_form.OnFieldEdited m_fieldName, newVal
         End If
     End If

@@ -6,8 +6,8 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-start "" "%~dp0casedesk.xlsm"
-timeout /t 2 /nobreak >nul
-start "" "%~dp0sample\casedesk-sample.xlsx"
 echo.
-echo Done. Run Alt+F8 ^> CaseDesk_ShowPanel in Excel.
+echo Opening sample workbook and installing add-in...
+powershell -ExecutionPolicy Bypass -File "%~dp0scripts\Run-Sample.ps1"
+echo.
+echo Done.

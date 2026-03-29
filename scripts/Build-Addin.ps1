@@ -1,5 +1,5 @@
 # Build-Addin.ps1
-# VBAソースファイルをインポートした開発用.xlsmを自動生成する
+# VBAソースファイルをインポートしたxlam/xlsmを自動生成する
 #
 # 前提条件:
 #   Excel > ファイル > オプション > トラストセンター > トラストセンターの設定
@@ -7,11 +7,11 @@
 #
 # 使い方:
 #   powershell -ExecutionPolicy Bypass -File Build-Addin.ps1
-#   powershell -ExecutionPolicy Bypass -File Build-Addin.ps1 -OutputFormat xlam
+#   powershell -ExecutionPolicy Bypass -File Build-Addin.ps1 -OutputFormat xlsm
 
 param(
     [ValidateSet('xlsm', 'xlam')]
-    [string]$OutputFormat = 'xlsm',
+    [string]$OutputFormat = 'xlam',
     [string]$OutputName = '',
     [switch]$Sample
 )
@@ -30,7 +30,8 @@ $basModules = @(
 $clsModules = @(
     'ErrorHandler.cls',
     'FieldEditor.cls',
-    'SheetWatcher.cls'
+    'SheetWatcher.cls',
+    'AppEventHandler.cls'
 )
 $frmModules = @(
     @{ Name = 'frmCaseDesk';       File = 'frmCaseDesk.frm' },
@@ -110,8 +111,37 @@ try {
         $codeMod.AddFromString($code)
     }
 
-    $thisWorkbookCode = @'
+    # --- ThisWorkbook code (differs by format) ---
+    if ($OutputFormat -eq 'xlam') {
+        $thisWorkbookCode = @'
 Option Explicit
+
+Private Sub Workbook_Open()
+    CaseDeskMain.InitAddin
+End Sub
+
+Private Sub Workbook_AddinInstall()
+    CaseDeskMain.InitAddin
+End Sub
+
+Private Sub Workbook_AddinUninstall()
+    CaseDeskMain.ShutdownAddin
+End Sub
+
+Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    On Error Resume Next
+    CaseDeskMain.ShutdownAddin
+    Me.Saved = True
+    On Error GoTo 0
+End Sub
+'@
+    } else {
+        $thisWorkbookCode = @'
+Option Explicit
+
+Private Sub Workbook_Open()
+    CaseDeskMain.InitAddin
+End Sub
 
 Private Sub Workbook_BeforeClose(Cancel As Boolean)
     On Error Resume Next
@@ -129,6 +159,8 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     On Error GoTo 0
 End Sub
 '@
+    }
+
     $docComp = $vbProj.VBComponents.Item('ThisWorkbook')
     $docCode = $docComp.CodeModule
     if ($docCode.CountOfLines -gt 0) { $docCode.DeleteLines(1, $docCode.CountOfLines) }
@@ -145,14 +177,11 @@ End Sub
     $cfgSheet.Visible = 2  # xlSheetVeryHidden
     $cfgSheet.Range("A1").Value2 = "key"
     $cfgSheet.Range("B1").Value2 = "value"
-    $cfgSheet.Range("A2").Value2 = "excel_path"
-    $cfgSheet.Range("A3").Value2 = "mail_folder"
-    $cfgSheet.Range("A4").Value2 = "case_folder_root"
     if ($Sample) {
-        $sampleXlsx = Join-Path $sampleDir 'casedesk-sample.xlsx'
-        $cfgSheet.Range("B2").Value2 = $sampleXlsx
-        $cfgSheet.Range("B3").Value2 = $mailDir
-        $cfgSheet.Range("B4").Value2 = $casesDir
+        $cfgSheet.Range("A2").Value2 = "mail_folder"
+        $cfgSheet.Range("B2").Value2 = $mailDir
+        $cfgSheet.Range("A3").Value2 = "case_folder_root"
+        $cfgSheet.Range("B3").Value2 = $casesDir
     }
 
     # _casedesk_sources: one row per source
@@ -166,6 +195,7 @@ End Sub
     $srcSheet.Range("E1").Value2 = "folder_link_column"
     $srcSheet.Range("F1").Value2 = "mail_match_mode"
     if ($Sample) {
+        $sampleXlsx = Join-Path $sampleDir 'casedesk-sample.xlsx'
         # Read column names from sample xlsx (no hardcoded Japanese)
         $sampleWb = $excel.Workbooks.Open($sampleXlsx, 0, $true)
         $sampleTbl = $null
@@ -216,7 +246,9 @@ End Sub
     $logTable = $logSheet.ListObjects.Add(1, $logSheet.Range("A1:G1"), $null, 1)  # xlSrcRange, xlYes
     $logTable.Name = "CaseDeskLog"
 
-    Write-Host "  config: mail=$mailDir, cases=$casesDir" -ForegroundColor Green
+    if ($Sample) {
+        Write-Host "  config: mail=$mailDir, cases=$casesDir" -ForegroundColor Green
+    }
 
     # --- Save ---
     if ([string]::IsNullOrWhiteSpace($OutputName)) {
@@ -227,10 +259,11 @@ End Sub
     $outputPath = Join-Path $projectDir $outputName
     $fileFormat = if ($OutputFormat -eq 'xlam') { 55 } else { 52 }
     if (Test-Path $outputPath) { Remove-Item $outputPath -Force }
+    if ($OutputFormat -eq 'xlam') {
+        $wb.IsAddin = $true
+    }
     $wb.SaveAs($outputPath, $fileFormat)
 
-    Write-Host ''
-    Write-Host "Build complete: $outputPath" -ForegroundColor Green
     Write-Host ''
     foreach ($comp in $vbProj.VBComponents) {
         $kind = switch ($comp.Type) { 1{'Module'} 2{'Class'} 3{'Form'} 100{'Document'} default{"Type$($comp.Type)"} }
@@ -243,3 +276,63 @@ End Sub
     [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
     [GC]::Collect()
 }
+
+# --- Inject customUI XML into xlam (ZIP manipulation) ---
+if ($OutputFormat -eq 'xlam') {
+    $customUIPath = Join-Path $srcDir 'customUI14.xml'
+    if (Test-Path $customUIPath) {
+        Write-Host '  Injecting customUI ribbon...'
+
+        # xlam is a ZIP — extract, add customUI, repack
+        $tempDir = Join-Path $env:TEMP "casedesk_build_$(Get-Random)"
+        $zipPath = $outputPath + '.zip'
+
+        Copy-Item $outputPath $zipPath -Force
+        Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
+        Remove-Item $zipPath -Force
+
+        # Add customUI folder and XML
+        $cuiDir = Join-Path $tempDir 'customUI'
+        New-Item -ItemType Directory -Path $cuiDir -Force | Out-Null
+        Copy-Item $customUIPath (Join-Path $cuiDir 'customUI14.xml') -Force
+
+        # Update [Content_Types].xml — add customUI content type
+        $ctPath = Join-Path $tempDir '[Content_Types].xml'
+        $ctXml = [xml](Get-Content -LiteralPath $ctPath)
+        $ns = $ctXml.DocumentElement.NamespaceURI
+        # Check if already exists
+        $existing = $ctXml.Types.Override | Where-Object { $_.PartName -eq '/customUI/customUI14.xml' }
+        if (-not $existing) {
+            $node = $ctXml.CreateElement('Override', $ns)
+            $node.SetAttribute('PartName', '/customUI/customUI14.xml')
+            $node.SetAttribute('ContentType', 'application/xml')
+            $ctXml.DocumentElement.AppendChild($node) | Out-Null
+            $ctXml.Save($ctPath)
+        }
+
+        # Update _rels/.rels — add relationship to customUI
+        $relsPath = Join-Path $tempDir '_rels\.rels'
+        $relsXml = [xml](Get-Content -LiteralPath $relsPath)
+        $relsNs = $relsXml.DocumentElement.NamespaceURI
+        $existing = $relsXml.Relationships.Relationship | Where-Object { $_.Target -eq 'customUI/customUI14.xml' }
+        if (-not $existing) {
+            $relNode = $relsXml.CreateElement('Relationship', $relsNs)
+            $relNode.SetAttribute('Id', 'rIdCustomUI')
+            $relNode.SetAttribute('Type', 'http://schemas.microsoft.com/office/2007/relationships/ui/extensibility')
+            $relNode.SetAttribute('Target', 'customUI/customUI14.xml')
+            $relsXml.DocumentElement.AppendChild($relNode) | Out-Null
+            $relsXml.Save($relsPath)
+        }
+
+        # Repack as xlam
+        Remove-Item $outputPath -Force
+        Compress-Archive -Path (Join-Path $tempDir '*') -DestinationPath $zipPath -Force
+        Move-Item $zipPath $outputPath -Force
+        Remove-Item $tempDir -Recurse -Force
+
+        Write-Host '  customUI injected.' -ForegroundColor Green
+    }
+}
+
+Write-Host ''
+Write-Host "Build complete: $outputPath" -ForegroundColor Green

@@ -5,12 +5,49 @@ Public g_forceClose As Boolean
 Public g_formLoaded As Boolean
 Public g_workerApp As Object
 Public g_workerWb As Object
+Public g_appHandler As AppEventHandler
+Public g_dataWb As Workbook  ' Target workbook (captured at launch)
+
+' --- Addin Lifecycle ---
+
+Public Sub InitAddin()
+    If Not g_appHandler Is Nothing Then Exit Sub
+    Set g_appHandler = New AppEventHandler
+    Set g_appHandler.App = Application
+End Sub
+
+Public Sub ShutdownAddin()
+    BeforeWorkbookClose
+    Set g_appHandler = Nothing
+End Sub
+
+' --- Ribbon Callbacks (customUI requires control argument) ---
+
+Public Sub Ribbon_ShowPanel(control As IRibbonControl)
+    CaseDesk_ShowPanel
+End Sub
+
+Public Sub Ribbon_ShowSettings(control As IRibbonControl)
+    CaseDesk_ShowSettings
+End Sub
 
 ' --- Entry Points ---
 
 Public Sub CaseDesk_ShowPanel()
     Dim eh As New ErrorHandler: eh.Enter "CaseDeskMain", "ShowPanel"
     On Error GoTo ErrHandler
+
+    ' Capture ActiveWorkbook at launch (skip the xlam itself)
+    If ActiveWorkbook Is Nothing Then
+        MsgBox "No workbook is open.", vbExclamation, "CaseDesk"
+        Exit Sub
+    End If
+    If ActiveWorkbook.FullName = ThisWorkbook.FullName Then
+        MsgBox "Please activate a data workbook first.", vbExclamation, "CaseDesk"
+        Exit Sub
+    End If
+    Set g_dataWb = ActiveWorkbook
+
     CaseDeskLib.EnsureConfigSheets
     CaseDeskLib.EnsureLogSheet
     EnsureCaseDeskSheets
@@ -48,7 +85,14 @@ Public Sub BeforeWorkbookClose()
     g_formLoaded = False
     StopWorker
     CaseDeskLib.SaveToSheets
+    Set g_dataWb = Nothing
 End Sub
+
+' --- Cache Path ---
+
+Private Function GetCacheRoot() As String
+    GetCacheRoot = Environ$("LOCALAPPDATA") & "\CaseDesk"
+End Function
 
 ' --- FE Data Sheets ---
 
@@ -96,7 +140,9 @@ Public Sub StartWorker(mailFolder As String, caseRoot As String, _
     g_workerApp.AutomationSecurity = prevSec
     Set g_workerWb = g_workerApp.Workbooks(g_workerApp.Workbooks.Count)
 
-    g_workerApp.Run "CaseDeskWorker.WorkerEntryPoint", mailFolder, caseRoot, matchField, matchMode, ThisWorkbook
+    Dim cachePath As String: cachePath = GetCacheRoot()
+    CaseDeskLib.EnsureFolder cachePath
+    g_workerApp.Run "CaseDeskWorker.WorkerEntryPoint", mailFolder, caseRoot, matchField, matchMode, ThisWorkbook, cachePath
 
     WriteWorkerPid beforePids
 
@@ -123,13 +169,12 @@ End Sub
 ' --- PID Management ---
 
 Private Function GetWorkerPidPath() As String
-    GetWorkerPidPath = ThisWorkbook.path & "\.casedesk_cache\_worker.pid"
+    GetWorkerPidPath = GetCacheRoot() & "\_worker.pid"
 End Function
 
 Private Sub WriteWorkerPid(beforePids As Object)
     On Error Resume Next
     If g_workerApp Is Nothing Then Exit Sub
-    ' Find the new PID by comparing Excel PIDs before/after CreateObject
     Dim afterPids As Object: Set afterPids = GetExcelPids()
     Dim pid As Long: pid = 0
     Dim k As Variant
@@ -137,7 +182,7 @@ Private Sub WriteWorkerPid(beforePids As Object)
         If Not beforePids.Exists(k) Then pid = CLng(k): Exit For
     Next k
     If pid = 0 Then Exit Sub
-    CaseDeskLib.EnsureFolder ThisWorkbook.path & "\.casedesk_cache"
+    CaseDeskLib.EnsureFolder GetCacheRoot()
     Dim pidPath As String: pidPath = GetWorkerPidPath()
     Dim f As Long: f = FreeFile
     Open pidPath For Output As #f

@@ -17,7 +17,6 @@ Option Explicit
 ' ============================================================================
 ' Controls
 ' ============================================================================
-Private WithEvents m_cmdBrowseExcel As MSForms.CommandButton
 Private WithEvents m_cmbTable As MSForms.ComboBox
 Private WithEvents m_cmbKeyCol As MSForms.ComboBox
 Private WithEvents m_cmbNameCol As MSForms.ComboBox
@@ -29,7 +28,7 @@ Private WithEvents m_cmdBrowseCase As MSForms.CommandButton
 Private WithEvents m_cmdSave As MSForms.CommandButton
 Private WithEvents m_cmdCancel As MSForms.CommandButton
 
-Private m_txtExcelPath As MSForms.TextBox
+Private m_lblDataWb As MSForms.Label
 Private m_txtMailFolder As MSForms.TextBox
 Private m_txtCaseFolder As MSForms.TextBox
 
@@ -37,8 +36,6 @@ Private m_txtCaseFolder As MSForms.TextBox
 ' State
 ' ============================================================================
 Private m_suppressEvents As Boolean
-Private m_inspectWb As Workbook
-Private m_inspectWbOpened As Boolean
 
 Private Const M As Long = 12
 Private Const LBL_W As Single = 80
@@ -51,7 +48,7 @@ Private Const ROW_H As Single = 28
 Private Sub UserForm_Initialize()
     Dim eh As New ErrorHandler: eh.Enter "frmSettings", "UserForm_Initialize"
     On Error GoTo ErrHandler
-    Me.Width = 440: Me.Height = 440
+    Me.Width = 440: Me.Height = 400
     m_suppressEvents = True
     BuildLayout
     LoadConfig
@@ -78,9 +75,10 @@ Private Sub BuildLayout()
     AddSection Me, "secSrc", M, y, "Source"
     y = y + 20
 
-    AddLabel Me, "lblExcel", M, y, LBL_W, "Excel file:"
-    Set m_txtExcelPath = AddTextBox(Me, "txtExcel", inputL, y, inputW - 36)
-    Set m_cmdBrowseExcel = AddBtn(Me, "cmdBrExcel", cw - M - 32, y, 32, 20, "...")
+    ' Show data workbook name (read-only)
+    AddLabel Me, "lblWb", M, y, LBL_W, "Workbook:"
+    Set m_lblDataWb = AddLabel(Me, "lblDataWbVal", inputL, y, inputW, 14)
+    m_lblDataWb.ForeColor = &H404040
     y = y + ROW_H
 
     AddLabel Me, "lblTable", M, y, LBL_W, "Table:"
@@ -189,12 +187,18 @@ End Function
 Private Sub LoadConfig()
     m_suppressEvents = True
 
-    m_txtExcelPath.Text = CaseDeskLib.GetStr("excel_path")
+    ' Show data workbook name
+    If Not CaseDeskMain.g_dataWb Is Nothing Then
+        m_lblDataWb.Caption = CaseDeskMain.g_dataWb.Name
+    Else
+        m_lblDataWb.Caption = "(no workbook)"
+    End If
+
     m_txtMailFolder.Text = CaseDeskLib.GetStr("mail_folder")
     m_txtCaseFolder.Text = CaseDeskLib.GetStr("case_folder_root")
 
-    ' Load tables from Excel path
-    If Len(m_txtExcelPath.Text) > 0 Then LoadTables
+    ' Load tables from data workbook
+    LoadTables
 
     ' Restore selected source
     Dim sources As Collection: Set sources = CaseDeskLib.GetSourceNames()
@@ -214,7 +218,7 @@ End Sub
 
 Private Sub LoadTables()
     m_cmbTable.Clear
-    Dim wb As Workbook: Set wb = FindOrOpenWorkbook(m_txtExcelPath.Text)
+    Dim wb As Workbook: Set wb = CaseDeskMain.g_dataWb
     If wb Is Nothing Then Exit Sub
     Dim names As Collection: Set names = CaseDeskData.GetWorkbookTableNames(wb)
     Dim n As Variant
@@ -228,7 +232,7 @@ Private Sub LoadColumns()
     m_cmbFolderCol.Clear
     If m_cmbTable.ListIndex < 0 Then Exit Sub
 
-    Dim wb As Workbook: Set wb = FindOrOpenWorkbook(m_txtExcelPath.Text)
+    Dim wb As Workbook: Set wb = CaseDeskMain.g_dataWb
     If wb Is Nothing Then Exit Sub
     Dim tbl As ListObject: Set tbl = CaseDeskData.FindTable(wb, m_cmbTable.Text)
     If tbl Is Nothing Then Exit Sub
@@ -253,60 +257,9 @@ Private Sub SelectComboItem(cmb As MSForms.ComboBox, val As String)
     Next i
 End Sub
 
-Private Function FindOrOpenWorkbook(path As String) As Workbook
-    If Len(path) = 0 Then Exit Function
-    If Dir$(path) = "" Then Exit Function
-
-    ' Check already open (match by full path, then by file name)
-    Dim wb As Workbook
-    For Each wb In Application.Workbooks
-        On Error Resume Next
-        Dim wbPath As String: wbPath = wb.FullName
-        On Error GoTo 0
-        If LCase$(wbPath) = LCase$(path) Then
-            Set FindOrOpenWorkbook = wb: Exit Function
-        End If
-    Next wb
-    Dim fileName As String: fileName = Dir$(path)
-    For Each wb In Application.Workbooks
-        If LCase$(wb.Name) = LCase$(fileName) Then
-            Set FindOrOpenWorkbook = wb: Exit Function
-        End If
-    Next wb
-
-    ' Open for inspection
-    CleanupInspectWb
-    On Error Resume Next
-    Set wb = Application.Workbooks.Open(path, UpdateLinks:=0)
-    If wb Is Nothing Then
-        Set wb = Application.Workbooks.Open(path, ReadOnly:=True, UpdateLinks:=0)
-    End If
-    On Error GoTo 0
-    If Not wb Is Nothing Then
-        Set m_inspectWb = wb
-        m_inspectWbOpened = True
-        Set FindOrOpenWorkbook = wb
-    End If
-End Function
-
 ' ============================================================================
 ' Events
 ' ============================================================================
-
-Private Sub m_cmdBrowseExcel_Click()
-    Dim path As String
-    With Application.FileDialog(msoFileDialogFilePicker)
-        .title = "Select Excel file"
-        .Filters.Clear
-        .Filters.Add "Excel files", "*.xlsx;*.xlsm;*.xls"
-        If .Show = -1 Then path = .SelectedItems(1)
-    End With
-    If Len(path) > 0 Then
-        CleanupInspectWb
-        m_txtExcelPath.Text = path
-        LoadTables
-    End If
-End Sub
 
 Private Sub m_cmbTable_Change()
     If m_suppressEvents Then Exit Sub
@@ -342,7 +295,6 @@ Private Sub m_cmdSave_Click()
         End If
     End If
 
-    CaseDeskLib.SetStr "excel_path", m_txtExcelPath.Text
     CaseDeskLib.SetStr "mail_folder", m_txtMailFolder.Text
     CaseDeskLib.SetStr "case_folder_root", m_txtCaseFolder.Text
 
@@ -356,34 +308,18 @@ Private Sub m_cmdSave_Click()
         If m_cmbFolderCol.ListIndex > 0 Then CaseDeskLib.SetSourceStr src, "folder_link_column", m_cmbFolderCol.Text
 
         ' Auto-detect field settings from table format
-        Dim wb As Workbook: Set wb = FindOrOpenWorkbook(m_txtExcelPath.Text)
+        Dim wb As Workbook: Set wb = CaseDeskMain.g_dataWb
         If Not wb Is Nothing Then
             Dim tbl As ListObject: Set tbl = CaseDeskData.FindTable(wb, src)
             If Not tbl Is Nothing Then CaseDeskLib.InitFieldSettingsFromTable src, tbl
         End If
     End If
 
-    CleanupInspectWb
     Unload Me
     eh.OK: Exit Sub
 ErrHandler: eh.Catch
 End Sub
 
 Private Sub m_cmdCancel_Click()
-    CleanupInspectWb
     Unload Me
-End Sub
-
-Private Sub UserForm_QueryClose(Cancel As Integer, CloseMode As Integer)
-    CleanupInspectWb
-End Sub
-
-Private Sub CleanupInspectWb()
-    If m_inspectWbOpened And Not m_inspectWb Is Nothing Then
-        On Error Resume Next
-        m_inspectWb.Close SaveChanges:=False
-        On Error GoTo 0
-    End If
-    Set m_inspectWb = Nothing
-    m_inspectWbOpened = False
 End Sub
