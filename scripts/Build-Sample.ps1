@@ -1,4 +1,4 @@
-# Build-Sample.ps1
+﻿# Build-Sample.ps1
 # サンプルデータ（Excel台帳 + メールアーカイブ + 案件フォルダ）を自動生成する
 #
 # 使い方:
@@ -257,8 +257,93 @@ for ($r = 1; $r -le $Count; $r++) {
 }
 Write-Host "  cases: $Count folders created" -ForegroundColor Green
 
+# ============================================================================
+# 4. Generate manifest.csv for mail (watchbox-compatible format)
+# Format: entry_id,sender_email,sender_name,subject,received_at,
+#         folder_path,body_path,msg_path,attachment_paths,mail_folder,body_text
+# ============================================================================
+
+Write-Host ''
+Write-Host 'Generating mail manifest.csv...' -ForegroundColor Cyan
+
+$mailManifest = "entry_id,sender_email,sender_name,subject,received_at,folder_path,body_path,msg_path,attachment_paths,mail_folder,body_text`n"
+$mailDirs = Get-ChildItem -Path $mailOut -Directory | Sort-Object Name
+foreach ($dir in $mailDirs) {
+    $metaPath = Join-Path $dir.FullName 'meta.json'
+    if (-not (Test-Path $metaPath)) { continue }
+    $metaText = [System.IO.File]::ReadAllText($metaPath, [System.Text.Encoding]::UTF8)
+
+    # Simple JSON parse (no external dependency)
+    function ExtractJsonValue($json, $key) {
+        if ($json -match "`"$key`"\s*:\s*`"([^`"]*)`"") { return $matches[1] }
+        return ""
+    }
+
+    $entryId = ExtractJsonValue $metaText 'entry_id'
+    $senderEmail = ExtractJsonValue $metaText 'sender_email'
+    $senderName = ExtractJsonValue $metaText 'sender_name'
+    $subject = ExtractJsonValue $metaText 'subject'
+    $receivedAt = ExtractJsonValue $metaText 'received_at'
+    $folderPathVal = $dir.FullName
+    $bodyPath = Join-Path $dir.FullName 'body.txt'
+    $msgPath = ''
+    $mailFolder = ExtractJsonValue $metaText 'folder_path'
+
+    # Collect attachment paths (pipe-separated)
+    $attPaths = @()
+    $attFiles = Get-ChildItem -Path $dir.FullName -File | Where-Object { $_.Name -ne 'meta.json' -and $_.Name -ne 'body.txt' }
+    foreach ($att in $attFiles) { $attPaths += $att.FullName }
+    $attPathStr = $attPaths -join '|'
+
+    # Read body text (first 500 chars, sanitize commas/newlines)
+    $bodyText = ''
+    if (Test-Path $bodyPath) {
+        $bodyText = [System.IO.File]::ReadAllText($bodyPath, [System.Text.Encoding]::UTF8)
+        if ($bodyText.Length -gt 500) { $bodyText = $bodyText.Substring(0, 500) }
+        $bodyText = $bodyText.Replace(',', ' ').Replace("`r`n", ' ').Replace("`n", ' ').Replace("`r", ' ')
+    }
+
+    # Sanitize commas in fields
+    $senderName = $senderName.Replace(',', ' ')
+    $subject = $subject.Replace(',', ' ')
+
+    $mailManifest += "$entryId,$senderEmail,$senderName,$subject,$receivedAt,$folderPathVal,$bodyPath,$msgPath,$attPathStr,$mailFolder,$bodyText`n"
+}
+Write-Utf8NoBom (Join-Path $mailOut 'manifest.csv') $mailManifest
+Write-Host "  manifest.csv written ($($mailDirs.Count) entries)" -ForegroundColor Green
+
+# ============================================================================
+# 5. Generate manifest.csv for cases (watchbox-compatible format)
+# Format: item_id,file_name,file_path,folder_path,relative_path,file_size,modified_at
+# ============================================================================
+
+Write-Host 'Generating cases manifest.csv...' -ForegroundColor Cyan
+
+$caseManifest = "item_id,file_name,file_path,folder_path,relative_path,file_size,modified_at`n"
+$caseFileCount = 0
+$allFiles = Get-ChildItem -Path $casesOut -Recurse -File
+foreach ($file in $allFiles) {
+    $relativePath = $file.FullName.Substring($casesOut.Length + 1)
+    # item_id = first 16 hex chars of SHA256(lowercase relative path with forward slashes)
+    $normalizedPath = $relativePath.ToLower().Replace('\', '/')
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $hashBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($normalizedPath))
+    $itemId = [BitConverter]::ToString($hashBytes).Replace('-','').Substring(0,16).ToLower()
+
+    $fileName = $file.Name
+    $filePath = $file.FullName
+    $folderPath = $file.DirectoryName
+    $fileSize = $file.Length
+    $modifiedAt = $file.LastWriteTime.ToString('yyyy-MM-ddTHH:mm:ss')
+
+    $caseManifest += "$itemId,$fileName,$filePath,$folderPath,$relativePath,$fileSize,$modifiedAt`n"
+    $caseFileCount++
+}
+Write-Utf8NoBom (Join-Path $casesOut 'manifest.csv') $caseManifest
+Write-Host "  manifest.csv written ($caseFileCount files)" -ForegroundColor Green
+
 Write-Host ''
 Write-Host 'Sample data ready!' -ForegroundColor Green
 Write-Host "  Workbook: sample\casedesk-sample.xlsx ($Count rows, 1 table)"
-Write-Host "  Mail:     sample\mail\ ($mailNum folders)"
-Write-Host "  Cases:    sample\cases\ ($Count folders)"
+Write-Host "  Mail:     sample\mail\ ($mailNum folders + manifest.csv)"
+Write-Host "  Cases:    sample\cases\ ($Count folders + manifest.csv)"

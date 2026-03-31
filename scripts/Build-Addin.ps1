@@ -134,6 +134,16 @@ Private Sub Workbook_BeforeClose(Cancel As Boolean)
     Me.Saved = True
     On Error GoTo 0
 End Sub
+
+Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
+    On Error Resume Next
+    Dim sn As String: sn = Sh.Name
+    If Left$(sn, Len("_casedesk")) <> "_casedesk" Then Exit Sub
+    Application.ScreenUpdating = False
+    If CaseDeskMain.g_formLoaded Then frmCaseDesk.OnCaseDeskSheetChange sn
+    Application.ScreenUpdating = True
+    On Error GoTo 0
+End Sub
 '@
     } else {
         $thisWorkbookCode = @'
