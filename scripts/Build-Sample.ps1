@@ -72,8 +72,25 @@ try {
     $ws = $wb.Sheets.Item(1)
     $ws.Name = 'anken'
 
-    # Headers
-    $headers = @('案件ID','団体名','代表者','メールアドレス','申請日','申請額','ステータス','担当者','不足書類','備考')
+    # Headers — designed to demonstrate all prefix/tab features:
+    #   基本_xxx    → "基本" tab (normal, editable)
+    #   審査_xxx    → "審査" tab (normal, editable)
+    #   _基本_登録日 → "基本" tab (readonly, _xx_AAA prefix)
+    #   __内部メモ   → hidden in UI (__AAA prefix), usable as setting column
+    $headers = @(
+        '案件ID',             # key column (no prefix → "_other" tab)
+        '基本_団体名',         # 基本 tab
+        '基本_代表者',         # 基本 tab
+        '基本_メールアドレス',  # 基本 tab (mail link column)
+        '基本_申請日',         # 基本 tab (date type)
+        '基本_申請額',         # 基本 tab (currency type, comma formatting)
+        '審査_ステータス',     # 審査 tab
+        '審査_担当者',         # 審査 tab
+        '審査_不足書類',       # 審査 tab
+        '審査_備考',           # 審査 tab (multiline)
+        '_基本_登録日',        # readonly prefix: visible but not editable
+        '__内部メモ'           # hidden prefix: not shown in UI, usable in settings
+    )
     for ($c = 0; $c -lt $headers.Count; $c++) {
         $ws.Cells.Item(1, $c + 1).Value2 = $headers[$c]
     }
@@ -96,7 +113,9 @@ try {
         $status = Pick $statuses
         $staff = Pick $staffNames
         $missingDoc = if ($status -eq '書類不備') { Pick $docNames } else { '' }
-        $memo = if ((RandInt 1 5) -eq 1) { "備考メモ$r" } else { '' }
+        $memo = if ((RandInt 1 5) -eq 1) { "備考メモ$r`nこの案件は要確認です。" } else { '' }
+        $regDate = $applyDate.AddDays(-(RandInt 1 10)).ToString('yyyy/MM/dd')
+        $internalNote = "内部ID:$r priority:$(RandInt 1 5)"
 
         $row = $r + 1
         $ws.Cells.Item($row, 1).Value2 = [string]$caseId
@@ -109,6 +128,8 @@ try {
         $ws.Cells.Item($row, 8).Value2 = [string]$staff
         $ws.Cells.Item($row, 9).Value2 = [string]$missingDoc
         $ws.Cells.Item($row, 10).Value2 = [string]$memo
+        $ws.Cells.Item($row, 11).Value2 = [string]$regDate
+        $ws.Cells.Item($row, 12).Value2 = [string]$internalNote
 
         $script:caseEmails[$caseId] = @{ Email = $email; Name = $personName }
 
@@ -118,9 +139,10 @@ try {
     # Format columns
     $ws.Range("E2:E$($Count+1)").NumberFormat = 'yyyy/mm/dd'
     $ws.Range("F2:F$($Count+1)").NumberFormat = '#,##0'
+    $ws.Range("K2:K$($Count+1)").NumberFormat = 'yyyy/mm/dd'
 
     # Create table
-    $tblRange = $ws.Range($ws.Cells.Item(1, 1), $ws.Cells.Item($Count + 1, 10))
+    $tblRange = $ws.Range($ws.Cells.Item(1, 1), $ws.Cells.Item($Count + 1, 12))
     $lo = $ws.ListObjects.Add(1, $tblRange, $null, 1)
     $lo.Name = 'anken'
     $lo.TableStyle = 'TableStyleMedium2'
