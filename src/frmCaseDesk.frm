@@ -494,6 +494,8 @@ Private Sub ResizeFrameEditors(fra As MSForms.Frame, frameW As Single)
             ' compact fields (number/date/currency) keep fixed width
             If ctl.Width <= 150 And ctl.TextAlign = fmTextAlignRight Then GoTo NextCtl
             ctl.Width = editorW
+        ElseIf TypeName(ctl) = "Label" Then
+            ctl.Width = editorW
         End If
 NextCtl:
     Next ci
@@ -711,17 +713,22 @@ Private Sub AddFieldEditorsToPage(pg As MSForms.Page, fields As Collection, keyC
         Dim fn As String: fn = CStr(fields(i))
         ' Skip fields ending with "_非表示"
         If Right$(fn, Len(HIDE_SUFFIX)) = HIDE_SUFFIX Then GoTo NextField
+        ' Skip hidden prefix (__AAA) fields
+        If CaseDeskLib.IsHiddenField(fn) Then GoTo NextField
         Dim isMultiline As Boolean: isMultiline = CaseDeskLib.GetFieldBool(m_currentSource, fn, "multiline")
         Dim isEditable As Boolean: isEditable = CaseDeskLib.GetFieldBool(m_currentSource, fn, "editable", True)
         If fn = keyCol Then isEditable = False
+        ' Read-only prefix (_xx_AAA) forces non-editable
+        If CaseDeskLib.IsReadOnlyField(fn) Then isEditable = False
 
         Dim lbl As MSForms.Label
         Set lbl = fraScroll.Controls.Add("Forms.Label.1", "lbl_" & fn)
-        lbl.Left = editorLeft: lbl.Top = yPos: lbl.Width = labelW: lbl.Height = 14
+        lbl.Left = editorLeft: lbl.Top = yPos: lbl.Width = editorW: lbl.Height = 14
         lbl.Caption = GetFieldShortName(fn)
         lbl.ControlTipText = fn
         lbl.Font.Name = "Meiryo UI": lbl.Font.Size = 8
         lbl.ForeColor = RGB(100, 100, 100)
+        lbl.WordWrap = False
 
         Dim fType As String: fType = CaseDeskLib.GetFieldStr(m_currentSource, fn, "type", "text")
         Dim isCompact As Boolean: isCompact = (fType = "number" Or fType = "date" Or fType = "currency")
@@ -777,8 +784,8 @@ Private Sub BuildJoinedTabs()
     On Error GoTo ErrHandler
     m_mailPageIdx = -1: m_filesPageIdx = -1
 
-    ' DEBUG: show conditions in status bar
-    If Len(CaseDeskLib.GetSourceStr(m_currentSource, "mail_link_column")) > 0 And CaseDeskData.GetMailCount() > 0 Then
+    ' Always show Mail/Files tabs when link columns are configured (data may arrive later from worker)
+    If Len(CaseDeskLib.GetSourceStr(m_currentSource, "mail_link_column")) > 0 Then
         m_mpgTabs.Pages.Add
         m_mailPageIdx = m_mpgTabs.Pages.Count - 1
         Dim pgMail As MSForms.Page: Set pgMail = m_mpgTabs.Pages(m_mailPageIdx)
@@ -786,7 +793,7 @@ Private Sub BuildJoinedTabs()
         BuildMailPage pgMail
     End If
 
-    If Len(CaseDeskLib.GetSourceStr(m_currentSource, "folder_link_column")) > 0 And CaseDeskData.GetCaseCount() > 0 Then
+    If Len(CaseDeskLib.GetSourceStr(m_currentSource, "folder_link_column")) > 0 Then
         m_mpgTabs.Pages.Add
         m_filesPageIdx = m_mpgTabs.Pages.Count - 1
         Dim pgFiles As MSForms.Page: Set pgFiles = m_mpgTabs.Pages(m_filesPageIdx)
@@ -913,7 +920,7 @@ Private Sub UpdateRecordList()
             Dim allText As String: allText = ""
             Dim col As ListColumn
             For Each col In m_currentTable.ListColumns
-                If Not col.Name Like "_*" Then
+                If Not CaseDeskLib.IsHiddenField(col.Name) Then
                     Dim v As Variant: v = m_currentTable.DataBodyRange.Cells(r, col.Index).Value
                     If Not IsNull(v) And Not IsEmpty(v) Then allText = allText & " " & CStr(v)
                 End If
@@ -1338,7 +1345,7 @@ Public Sub OnCaseDeskSheetChange(sheetName As String)
             ' Version from local sheet
             Dim sigSh As Worksheet: Set sigSh = ThisWorkbook.Worksheets("_casedesk_signal")
             Dim ver As Long: ver = 0
-            On Error Resume Next: ver = CLng(sigSh.Range("B1").Value): On Error GoTo 0
+            On Error Resume Next: ver = CLng(sigSh.Range("B1").Value)
             If ver > 0 And ver <> m_workerLastVersion Then
                 m_workerLastVersion = ver
                 LoadDataFromLocalSheets
@@ -1360,7 +1367,6 @@ Private Sub LoadDataFromLocalSheets()
 
     If Not m_workerReady Then
         m_workerReady = True
-        If m_mailPageIdx < 0 Or m_filesPageIdx < 0 Then BuildJoinedTabs
     End If
 
     If Not m_lblStatus Is Nothing Then

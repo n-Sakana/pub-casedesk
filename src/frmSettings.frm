@@ -36,6 +36,7 @@ Private m_txtCaseFolder As MSForms.TextBox
 ' State
 ' ============================================================================
 Private m_suppressEvents As Boolean
+Private m_colDisplayToRaw As Object  ' Dict: stripped display name -> raw column name
 
 Private Const M As Long = 12
 Private Const LBL_W As Single = 80
@@ -50,6 +51,7 @@ Private Sub UserForm_Initialize()
     On Error GoTo ErrHandler
     Me.Width = 440: Me.Height = 400
     m_suppressEvents = True
+    Set m_colDisplayToRaw = CreateObject("Scripting.Dictionary")
     BuildLayout
     LoadConfig
     m_suppressEvents = False
@@ -230,6 +232,7 @@ Private Sub LoadColumns()
     m_cmbNameCol.Clear
     m_cmbMailCol.Clear
     m_cmbFolderCol.Clear
+    Set m_colDisplayToRaw = CreateObject("Scripting.Dictionary")
     If m_cmbTable.ListIndex < 0 Then Exit Sub
 
     Dim wb As Workbook: Set wb = CaseDeskMain.g_dataWb
@@ -242,18 +245,25 @@ Private Sub LoadColumns()
     m_cmbKeyCol.AddItem "": m_cmbNameCol.AddItem ""
     m_cmbMailCol.AddItem "": m_cmbFolderCol.AddItem ""
     For Each c In cols
-        m_cmbKeyCol.AddItem CStr(c)
-        m_cmbNameCol.AddItem CStr(c)
-        m_cmbMailCol.AddItem CStr(c)
-        m_cmbFolderCol.AddItem CStr(c)
+        Dim rawName As String: rawName = CStr(c)
+        Dim dispName As String: dispName = CaseDeskLib.StripFieldPrefix(rawName)
+        ' If stripped name collides, use raw name to avoid ambiguity
+        If m_colDisplayToRaw.Exists(dispName) Then dispName = rawName
+        m_colDisplayToRaw(dispName) = rawName
+        m_cmbKeyCol.AddItem dispName
+        m_cmbNameCol.AddItem dispName
+        m_cmbMailCol.AddItem dispName
+        m_cmbFolderCol.AddItem dispName
     Next c
 End Sub
 
 Private Sub SelectComboItem(cmb As MSForms.ComboBox, val As String)
     If Len(val) = 0 Then Exit Sub
+    ' Match by stripped display name (stored value may have prefix)
+    Dim dispVal As String: dispVal = CaseDeskLib.StripFieldPrefix(val)
     Dim i As Long
     For i = 0 To cmb.ListCount - 1
-        If cmb.List(i) = val Then cmb.ListIndex = i: Exit Sub
+        If cmb.List(i) = dispVal Or cmb.List(i) = val Then cmb.ListIndex = i: Exit Sub
     Next i
 End Sub
 
@@ -301,11 +311,19 @@ Private Sub m_cmdSave_Click()
     If m_cmbTable.ListIndex >= 0 Then
         Dim src As String: src = m_cmbTable.Text
         CaseDeskLib.EnsureSource src
-        CaseDeskLib.SetSourceStr src, "key_column", m_cmbKeyCol.Text
-        CaseDeskLib.SetSourceStr src, "display_name_column", m_cmbNameCol.Text
-        If m_cmbMailCol.ListIndex > 0 Then CaseDeskLib.SetSourceStr src, "mail_link_column", m_cmbMailCol.Text
+        CaseDeskLib.SetSourceStr src, "key_column", ResolveRawColName(m_cmbKeyCol.Text)
+        CaseDeskLib.SetSourceStr src, "display_name_column", ResolveRawColName(m_cmbNameCol.Text)
+        If m_cmbMailCol.ListIndex > 0 Then
+            CaseDeskLib.SetSourceStr src, "mail_link_column", ResolveRawColName(m_cmbMailCol.Text)
+        Else
+            CaseDeskLib.SetSourceStr src, "mail_link_column", ""
+        End If
         CaseDeskLib.SetSourceStr src, "mail_match_mode", m_cmbMailMatchMode.Text
-        If m_cmbFolderCol.ListIndex > 0 Then CaseDeskLib.SetSourceStr src, "folder_link_column", m_cmbFolderCol.Text
+        If m_cmbFolderCol.ListIndex > 0 Then
+            CaseDeskLib.SetSourceStr src, "folder_link_column", ResolveRawColName(m_cmbFolderCol.Text)
+        Else
+            CaseDeskLib.SetSourceStr src, "folder_link_column", ""
+        End If
 
         ' Auto-detect field settings from table format
         Dim wb As Workbook: Set wb = CaseDeskMain.g_dataWb
@@ -319,6 +337,13 @@ Private Sub m_cmdSave_Click()
     eh.OK: Exit Sub
 ErrHandler: eh.Catch
 End Sub
+
+Private Function ResolveRawColName(dispName As String) As String
+    ' Convert display name back to raw column name using mapping
+    ResolveRawColName = dispName
+    If m_colDisplayToRaw Is Nothing Then Exit Function
+    If m_colDisplayToRaw.Exists(dispName) Then ResolveRawColName = CStr(m_colDisplayToRaw(dispName))
+End Function
 
 Private Sub m_cmdCancel_Click()
     Unload Me

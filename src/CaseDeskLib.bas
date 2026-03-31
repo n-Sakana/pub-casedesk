@@ -362,13 +362,13 @@ Public Function FormatFieldValue(val As Variant, Optional fieldType As String = 
             If VarType(val) = vbDate Then
                 FormatFieldValue = Format$(CDate(val), "yyyy/mm/dd"): Exit Function
             End If
-        Case "currency"
+        Case "currency", "number"
             If IsNumeric(s) Then
                 Dim n As Double: n = CDbl(s)
                 If n = Int(n) Then
-                    FormatFieldValue = Format$(CLng(n), "#,0")
+                    FormatFieldValue = Format$(n, "#,##0")
                 Else
-                    FormatFieldValue = Format$(n, "#,0.##")
+                    FormatFieldValue = Format$(n, "#,##0.##")
                 End If
                 Exit Function
             End If
@@ -376,21 +376,57 @@ Public Function FormatFieldValue(val As Variant, Optional fieldType As String = 
     FormatFieldValue = s
 End Function
 
+' ============================================================================
+' Field Name Prefix System
+'   xx_AAA     -> normal: visible + editable
+'   _xx_AAA    -> readonly: visible + NOT editable (single leading _)
+'   __AAA      -> hidden: NOT visible in UI, but usable as setting columns
+' ============================================================================
+
+Public Function IsHiddenField(fieldName As String) As Boolean
+    ' "__AAA" pattern: starts with "__" and third char is NOT "_"
+    If Len(fieldName) >= 3 Then
+        IsHiddenField = (Left$(fieldName, 2) = "__" And Mid$(fieldName, 3, 1) <> "_")
+    End If
+End Function
+
+Public Function IsReadOnlyField(fieldName As String) As Boolean
+    ' "_x..." pattern: starts with "_" but not "__" (min 2 chars)
+    If Len(fieldName) >= 2 Then
+        If Left$(fieldName, 1) = "_" And Mid$(fieldName, 2, 1) <> "_" Then
+            IsReadOnlyField = True
+        End If
+    End If
+End Function
+
+Public Function StripFieldPrefix(fieldName As String) As String
+    ' Remove leading _ for display: _xx_AAA -> xx_AAA, __AAA -> AAA (for settings)
+    If IsReadOnlyField(fieldName) Then
+        StripFieldPrefix = Mid$(fieldName, 2)
+    ElseIf IsHiddenField(fieldName) Then
+        StripFieldPrefix = Mid$(fieldName, 3)
+    Else
+        StripFieldPrefix = fieldName
+    End If
+End Function
+
 Public Function GetFieldLabel(fieldName As String) As String
-    GetFieldLabel = Replace(fieldName, "_", " ")
+    GetFieldLabel = Replace(StripFieldPrefix(fieldName), "_", " ")
 End Function
 
 Public Function GetFieldGroup(fieldName As String) As String
-    Dim pos As Long: pos = InStr(fieldName, "_")
-    If pos > 1 And pos < Len(fieldName) Then GetFieldGroup = Left$(fieldName, pos - 1)
+    Dim cleaned As String: cleaned = StripFieldPrefix(fieldName)
+    Dim pos As Long: pos = InStr(cleaned, "_")
+    If pos > 1 And pos < Len(cleaned) Then GetFieldGroup = Left$(cleaned, pos - 1)
 End Function
 
 Public Function GetFieldShortName(fieldName As String) As String
-    Dim pos As Long: pos = InStr(fieldName, "_")
-    If pos > 1 And pos < Len(fieldName) Then
-        GetFieldShortName = Mid$(fieldName, pos + 1)
+    Dim cleaned As String: cleaned = StripFieldPrefix(fieldName)
+    Dim pos As Long: pos = InStr(cleaned, "_")
+    If pos > 1 And pos < Len(cleaned) Then
+        GetFieldShortName = Mid$(cleaned, pos + 1)
     Else
-        GetFieldShortName = fieldName
+        GetFieldShortName = cleaned
     End If
 End Function
 
@@ -636,17 +672,43 @@ End Sub
 
 Public Sub InitFieldSettingsFromTable(src As String, tbl As ListObject)
     If Not m_loaded Then EnsureConfigSheets
+
+    ' Build set of current table columns
+    Dim currentCols As Object: Set currentCols = CreateObject("Scripting.Dictionary")
     Dim col As ListColumn
     For Each col In tbl.ListColumns
-        If col.Name Like "_*" Then GoTo NextCol
+        ' Track all columns (including hidden) for stale removal
+        currentCols(LCase$(col.Name)) = col.Name
+        ' Skip hidden (__AAA) fields from UI field list
+        If IsHiddenField(col.Name) Then GoTo NextCol
         Dim fk As String: fk = LCase$(src) & "|" & LCase$(col.Name)
         If Not m_fields.Exists(fk) Then
             EnsureField src, col.Name
             SetFieldStr src, col.Name, "type", GuessFieldType(col)
             SetFieldStr src, col.Name, "multiline", CStr(GuessMultiline(col))
+            ' Read-only prefix (_xx_AAA) -> editable=False
+            If IsReadOnlyField(col.Name) Then
+                SetFieldStr src, col.Name, "editable", CStr(False)
+            End If
         End If
 NextCol:
     Next col
+
+    ' Remove field entries for columns that no longer exist in the table
+    Dim prefix As String: prefix = LCase$(src) & "|"
+    Dim toRemove As New Collection
+    Dim k As Variant
+    For Each k In m_fields.keys
+        If Left$(CStr(k), Len(prefix)) = prefix Then
+            Dim colName As String: colName = Mid$(CStr(k), Len(prefix) + 1)
+            If Not currentCols.Exists(colName) Then toRemove.Add CStr(k)
+        End If
+    Next k
+    Dim ri As Long
+    For ri = 1 To toRemove.Count
+        m_fields.Remove CStr(toRemove(ri))
+        m_dirty = True
+    Next ri
 End Sub
 
 Private Function GuessFieldType(col As ListColumn) As String

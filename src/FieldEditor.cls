@@ -73,7 +73,7 @@ End Sub
 
 Private Function FormatDisplay(val As String) As String
     FormatDisplay = val
-    If m_fieldType <> "currency" Then Exit Function
+    If m_fieldType <> "currency" And m_fieldType <> "number" Then Exit Function
     If Len(val) = 0 Then Exit Function
     If Not IsNumeric(val) Then Exit Function
     On Error Resume Next
@@ -84,9 +84,9 @@ Private Function FormatDisplay(val As String) As String
 End Function
 
 Private Function ParseRawValue() As String
-    ' Strip commas from displayed currency to get raw value
+    ' Strip commas from displayed number/currency to get raw value
     Dim txt As String: txt = m_txt.Text
-    If m_fieldType = "currency" Then
+    If m_fieldType = "currency" Or m_fieldType = "number" Then
         txt = Replace(txt, ",", "")
     End If
     ParseRawValue = txt

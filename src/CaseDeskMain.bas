@@ -78,6 +78,7 @@ Public Sub DeferredStartup()
     On Error GoTo 0
 End Sub
 
+
 ' --- Workbook Close ---
 
 Public Sub BeforeWorkbookClose()
@@ -93,6 +94,30 @@ End Sub
 Private Function GetCacheRoot() As String
     GetCacheRoot = Environ$("LOCALAPPDATA") & "\CaseDesk"
 End Function
+
+Private Function GetWorkerBookPath() As String
+    ' Worker cannot open the xlam (locked/IsAddin). Save a temp xlsm copy.
+    Dim cachePath As String: cachePath = GetCacheRoot()
+    CaseDeskLib.EnsureFolder cachePath
+    Dim dest As String: dest = cachePath & "\casedesk_worker.xlsm"
+    On Error Resume Next
+    ' Save a non-addin copy of ThisWorkbook as xlsm format
+    Dim wasAddin As Boolean: wasAddin = ThisWorkbook.IsAddin
+    ThisWorkbook.IsAddin = False
+    ThisWorkbook.SaveCopyAs dest
+    ThisWorkbook.IsAddin = wasAddin
+    On Error GoTo 0
+    GetWorkerBookPath = dest
+End Function
+
+Private Sub DebugLog(cachePath As String, msg As String)
+    On Error Resume Next
+    Dim f As Long: f = FreeFile
+    Open cachePath & "\_debug.log" For Append As #f
+    Print #f, Format$(Now, "hh:nn:ss") & " " & msg
+    Close #f
+    On Error GoTo 0
+End Sub
 
 ' --- FE Data Sheets ---
 
@@ -114,6 +139,9 @@ Private Sub EnsureHiddenSheet(wb As Workbook, shName As String)
         Set ws = wb.Worksheets.Add(After:=wb.Worksheets(wb.Worksheets.Count))
         ws.Name = shName
         ws.Visible = xlSheetVeryHidden
+    ElseIf shName = "_casedesk_signal" Then
+        ' Clear stale signal from previous session to prevent premature data load
+        ws.UsedRange.ClearContents
     End If
 End Sub
 
@@ -129,20 +157,27 @@ Public Sub StartWorker(mailFolder As String, caseRoot As String, _
 
     CleanupZombieWorker
 
+    Dim cachePath As String: cachePath = GetCacheRoot()
+    CaseDeskLib.EnsureFolder cachePath
+    DebugLog cachePath, "StartWorker begin: mail=" & mailFolder & " cases=" & caseRoot
+
     Dim beforePids As Object: Set beforePids = GetExcelPids()
     Set g_workerApp = CreateObject("Excel.Application")
     g_workerApp.Visible = False
     g_workerApp.DisplayAlerts = False
+    DebugLog cachePath, "Excel.Application created"
 
     Dim prevSec As Long: prevSec = g_workerApp.AutomationSecurity
     g_workerApp.AutomationSecurity = 1
-    g_workerApp.Workbooks.Open ThisWorkbook.FullName, ReadOnly:=True, UpdateLinks:=0
+    Dim workerBookPath As String: workerBookPath = GetWorkerBookPath()
+    DebugLog cachePath, "Opening: " & workerBookPath
+    g_workerApp.Workbooks.Open workerBookPath, ReadOnly:=True, UpdateLinks:=0
     g_workerApp.AutomationSecurity = prevSec
     Set g_workerWb = g_workerApp.Workbooks(g_workerApp.Workbooks.Count)
+    DebugLog cachePath, "Workbook opened, calling Run..."
 
-    Dim cachePath As String: cachePath = GetCacheRoot()
-    CaseDeskLib.EnsureFolder cachePath
     g_workerApp.Run "CaseDeskWorker.WorkerEntryPoint", mailFolder, caseRoot, matchField, matchMode, ThisWorkbook, cachePath
+    DebugLog cachePath, "Run returned OK"
 
     WriteWorkerPid beforePids
 

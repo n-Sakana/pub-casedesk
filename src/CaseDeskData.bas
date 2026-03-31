@@ -88,7 +88,7 @@ Public Function GetTableColumnNames(tbl As ListObject) As Collection
     Set GetTableColumnNames = New Collection
     Dim col As ListColumn
     For Each col In tbl.ListColumns
-        If Not (col.Name Like "_*") Then GetTableColumnNames.Add col.Name
+        GetTableColumnNames.Add col.Name
     Next col
     eh.OK: Exit Function
 ErrHandler: eh.Catch
@@ -164,15 +164,19 @@ Public Sub LoadFromLocalSheets(wb As Workbook)
     On Error Resume Next
     Dim ws As Worksheet
 
+    Set ws = Nothing
     Set ws = wb.Worksheets("_casedesk_mail")
     If Not ws Is Nothing Then LoadMailFromLocalSheet wb
 
+    Set ws = Nothing
     Set ws = wb.Worksheets("_casedesk_mail_idx")
     If Not ws Is Nothing Then LoadMailIndexFromLocalSheet wb
 
+    Set ws = Nothing
     Set ws = wb.Worksheets("_casedesk_cases")
     If Not ws Is Nothing Then LoadCasesFromLocalSheet wb
 
+    Set ws = Nothing
     Set ws = wb.Worksheets("_casedesk_files")
     If Not ws Is Nothing Then LoadCaseFilesFromLocalSheet wb
 

@@ -2,7 +2,7 @@
           xmlns:pub="http://n-sakana/pub">
   <ribbon>
     <tabs>
-      <tab idQ="pub:MainTab" label="vba-tools" insertAfterMso="TabHome">
+      <tab idQ="pub:MainTab" label="CaseDesk" insertAfterMso="TabView">
         <group id="grpCaseDesk" label="CaseDesk">
           <button id="btnShowPanel"
                   label="Show Panel"

@@ -162,13 +162,13 @@ Private Sub LoadMailFromManifest(manifestPath As String)
         rec.Add "_mail_folder", cols(9)
         If UBound(cols) >= 10 Then rec.Add "body_text", cols(10)
 
-        Set m_mailRecords(cols(9)) = rec
+        Set m_mailRecords(eid) = rec
         Set m_mailByEntryId(eid) = rec
         AddToMailIndex rec, eid
 
         ' Track added (new entries not in previous cache)
         If Not prevRecords Is Nothing Then
-            If Not prevRecords.Exists(cols(9)) Then
+            If Not prevRecords.Exists(eid) Then
                 m_mailAdded(eid) = cols(3) & " - " & cols(1)
             End If
         End If
@@ -424,6 +424,7 @@ Public Sub WorkerEntryPoint(mailFolder As String, caseRoot As String, _
 
     g_signalVersion = 0
     g_active = True
+    LogProfile "WorkerEntryPoint: mail=" & mailFolder & " cases=" & caseRoot
     Application.OnTime Now, "CaseDeskWorker.WorkerInitialScan"
 
     eh.OK: Exit Sub
