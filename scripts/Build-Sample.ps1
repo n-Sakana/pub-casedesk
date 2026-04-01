@@ -148,13 +148,65 @@ try {
     $lo.TableStyle = 'TableStyleMedium2'
     $ws.Columns.AutoFit() | Out-Null
 
+    # ================================================================
+    # Sheet 2: "他社台帳" — manual mapping test target
+    #   - No ListObject (UsedRange only)
+    #   - No prefix naming convention
+    #   - CamelCase ID column (GuessFieldRole test)
+    #   - Currency column with yen format (currency type test)
+    # ================================================================
+    Write-Host "Generating manual-mapping sheet..." -ForegroundColor Cyan
+    $ws2 = $wb.Sheets.Add([System.Type]::Missing, $wb.Sheets.Item($wb.Sheets.Count))
+    $ws2.Name = '他社台帳'
+
+    $extHeaders = @(
+        'RecordId',        # CamelCase ID — should auto-guess case_id
+        '件名',            # title candidate (Japanese)
+        '申請者名',        # person name — no obvious role
+        '連絡先',          # contact — could be mail_link
+        '提出日',          # date
+        '請求金額',        # currency (yen format)
+        '進捗',            # status candidate (Japanese)
+        'フォルダ名',      # folder — could be file_key
+        '備考欄'           # freeform text (multiline)
+    )
+    for ($c = 0; $c -lt $extHeaders.Count; $c++) {
+        $ws2.Cells.Item(1, $c + 1).Value2 = $extHeaders[$c]
+        $ws2.Cells.Item(1, $c + 1).Font.Bold = $true
+    }
+
+    $extStatuses = @('未着手','対応中','確認待ち','完了','保留')
+    $extCount = [Math]::Min($Count, 50)  # 50 rows is enough for manual mapping test
+    for ($r = 1; $r -le $extCount; $r++) {
+        $row = $r + 1
+        $ws2.Cells.Item($row, 1).Value2 = 'EXT-' + $r.ToString('0000')
+        $ws2.Cells.Item($row, 2).Value2 = (Pick $orgPrefixes) + '案件' + $r.ToString()
+        $ws2.Cells.Item($row, 3).Value2 = (Pick $lastNames) + ' ' + (Pick $firstNames)
+        $romanLast = [char](97 + ($rng.Next() % 26))
+        $ws2.Cells.Item($row, 4).Value2 = $romanLast + (RandInt 100 999).ToString() + '@' + (Pick $domains)
+        $baseDate = ([datetime]'2024-06-01').AddDays((RandInt 0 120))
+        $ws2.Cells.Item($row, 5).Value2 = $baseDate.ToString('yyyy/MM/dd')
+        $ws2.Cells.Item($row, 6).Value2 = [double]((RandInt 10 500) * 10000)
+        $ws2.Cells.Item($row, 7).Value2 = Pick $extStatuses
+        $ws2.Cells.Item($row, 8).Value2 = 'EXT-' + $r.ToString('0000')
+        $memo = if ((RandInt 1 3) -eq 1) { "注意事項あり`n要確認" } else { '' }
+        $ws2.Cells.Item($row, 9).Value2 = $memo
+    }
+
+    # Format: date and yen currency (triggers GuessFieldType "currency")
+    $ws2.Range("E2:E$($extCount+1)").NumberFormat = 'yyyy/mm/dd'
+    $ws2.Range("F2:F$($extCount+1)").NumberFormat = [char]0xA5 + '#,##0'
+    $ws2.Columns.AutoFit() | Out-Null
+
+    Write-Host "  manual-mapping sheet: $extCount rows (no ListObject)" -ForegroundColor Green
+
     # Save
     if (-not (Test-Path $sampleOut)) { New-Item -ItemType Directory -Path $sampleOut -Force | Out-Null }
     $outPath = Join-Path $sampleOut 'casedesk-sample.xlsx'
     if (Test-Path $outPath) { Remove-Item $outPath -Force }
     $wb.SaveAs($outPath, 51)
 
-    Write-Host "Workbook saved: $outPath ($Count rows)" -ForegroundColor Green
+    Write-Host "Workbook saved: $outPath ($Count + $extCount rows, 2 sheets)" -ForegroundColor Green
 
 } finally {
     if ($wb) { $wb.Close($false); [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wb) | Out-Null }

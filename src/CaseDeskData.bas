@@ -153,7 +153,6 @@ Public Function FindMailRecords(keyValue As String, matchField As String, matchM
         End If
 NextKey:
     Next kp
-    Set FindMailRecords = result
 End Function
 
 Public Function GetCaseCount() As Long

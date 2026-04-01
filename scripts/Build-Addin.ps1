@@ -199,11 +199,12 @@ End Sub
     $srcSheet.Name = "_casedesk_sources"
     $srcSheet.Visible = 2  # xlSheetVeryHidden
     $srcSheet.Range("A1").Value2 = "source_name"
-    $srcSheet.Range("B1").Value2 = "key_column"
-    $srcSheet.Range("C1").Value2 = "display_name_column"
-    $srcSheet.Range("D1").Value2 = "mail_link_column"
-    $srcSheet.Range("E1").Value2 = "folder_link_column"
-    $srcSheet.Range("F1").Value2 = "mail_match_mode"
+    $srcSheet.Range("B1").Value2 = "source_sheet"
+    $srcSheet.Range("C1").Value2 = "key_column"
+    $srcSheet.Range("D1").Value2 = "display_name_column"
+    $srcSheet.Range("E1").Value2 = "mail_link_column"
+    $srcSheet.Range("F1").Value2 = "folder_link_column"
+    $srcSheet.Range("G1").Value2 = "mail_match_mode"
     if ($Sample) {
         $sampleXlsx = Join-Path $sampleDir 'casedesk-sample.xlsx'
         # Read column names from sample xlsx (no hardcoded Japanese)
@@ -217,15 +218,16 @@ End Sub
         }
         if ($sampleTbl) {
             $srcSheet.Range("A2").Value2 = $sampleTbl.Name
-            $srcSheet.Range("B2").Value2 = $sampleTbl.ListColumns(1).Name  # key
-            $srcSheet.Range("C2").Value2 = $sampleTbl.ListColumns(2).Name  # display name
+            $srcSheet.Range("B2").Value2 = $sampleTbl.Range.Worksheet.Name  # source_sheet
+            $srcSheet.Range("C2").Value2 = $sampleTbl.ListColumns(1).Name  # key
+            $srcSheet.Range("D2").Value2 = $sampleTbl.ListColumns(2).Name  # display name
             # Find mail column: first column containing '@' in data
             foreach ($col in $sampleTbl.ListColumns) {
                 if ($col.DataBodyRange -and $col.DataBodyRange.Cells(1,1).Text -match '@') {
-                    $srcSheet.Range("D2").Value2 = $col.Name; break
+                    $srcSheet.Range("E2").Value2 = $col.Name; break
                 }
             }
-            $srcSheet.Range("E2").Value2 = $sampleTbl.ListColumns(1).Name  # folder = key
+            $srcSheet.Range("F2").Value2 = $sampleTbl.ListColumns(1).Name  # folder = key
         }
         $sampleWb.Close($false)
         [System.Runtime.InteropServices.Marshal]::ReleaseComObject($sampleWb) | Out-Null
@@ -237,10 +239,14 @@ End Sub
     $fldSheet.Visible = 2  # xlSheetVeryHidden
     $fldSheet.Range("A1").Value2 = "source_name"
     $fldSheet.Range("B1").Value2 = "field_name"
-    $fldSheet.Range("C1").Value2 = "type"
-    $fldSheet.Range("D1").Value2 = "in_list"
-    $fldSheet.Range("E1").Value2 = "editable"
-    $fldSheet.Range("F1").Value2 = "multiline"
+    $fldSheet.Range("C1").Value2 = "display_name"
+    $fldSheet.Range("D1").Value2 = "type"
+    $fldSheet.Range("E1").Value2 = "visible"
+    $fldSheet.Range("F1").Value2 = "in_list"
+    $fldSheet.Range("G1").Value2 = "editable"
+    $fldSheet.Range("H1").Value2 = "multiline"
+    $fldSheet.Range("I1").Value2 = "role"
+    $fldSheet.Range("J1").Value2 = "sort_order"
 
     # _casedesk_log (with ListObject table)
     $logSheet = $wb.Worksheets.Add([System.Reflection.Missing]::Value, $wb.Worksheets.Item($wb.Worksheets.Count))

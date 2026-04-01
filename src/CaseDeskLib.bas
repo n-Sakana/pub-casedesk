@@ -684,6 +684,8 @@ Public Sub InitFieldSettingsFromTable(src As String, tbl As ListObject)
     Dim col As ListColumn
     Dim ordinal As Long: ordinal = 0
     For Each col In tbl.ListColumns
+        On Error Resume Next
+        Err.Clear
         ordinal = ordinal + 1
         ' Track all columns (including hidden) for stale removal
         currentCols(LCase$(col.Name)) = col.Name
@@ -696,7 +698,7 @@ Public Sub InitFieldSettingsFromTable(src As String, tbl As ListObject)
             SetFieldStr src, col.Name, "multiline", CStr(GuessMultiline(col))
             SetFieldStr src, col.Name, "display_name", StripFieldPrefix(col.Name)
             SetFieldStr src, col.Name, "visible", CStr(True)
-            SetFieldStr src, col.Name, "role", GuessFieldRole(src, col.Name)
+            SetFieldStr src, col.Name, "role", ""
             SetFieldStr src, col.Name, "sort_order", CStr(ordinal)
             ' Read-only prefix (_xx_AAA) -> editable=False
             If IsReadOnlyField(col.Name) Then
@@ -713,6 +715,7 @@ Public Sub InitFieldSettingsFromTable(src As String, tbl As ListObject)
                 SetFieldStr src, col.Name, "sort_order", CStr(ordinal)
             End If
         End If
+        On Error GoTo 0
 NextCol:
     Next col
 
@@ -750,6 +753,8 @@ Public Sub InitFieldSettingsFromRange(src As String, ws As Worksheet)
     Dim ordinal As Long: ordinal = 0
     Dim c As Long
     For c = 0 To nCols - 1
+        On Error Resume Next
+        Err.Clear
         Dim colName As String
         Dim cv As Variant: cv = ws.Cells(headerRow, startCol + c).Value
         If IsEmpty(cv) Or Len(CStr(cv)) = 0 Then GoTo NextRangeCol
@@ -763,7 +768,7 @@ Public Sub InitFieldSettingsFromRange(src As String, ws As Worksheet)
             EnsureField src, colName
             SetFieldStr src, colName, "display_name", StripFieldPrefix(colName)
             SetFieldStr src, colName, "visible", CStr(True)
-            SetFieldStr src, colName, "role", GuessFieldRole(src, colName)
+            SetFieldStr src, colName, "role", ""
             SetFieldStr src, colName, "sort_order", CStr(ordinal)
             ' Guess type from cell data
             Dim guessType As String: guessType = "text"
@@ -787,6 +792,7 @@ Public Sub InitFieldSettingsFromRange(src As String, ws As Worksheet)
                 SetFieldStr src, colName, "sort_order", CStr(ordinal)
             End If
         End If
+        On Error GoTo 0
 NextRangeCol:
     Next c
 
@@ -830,11 +836,13 @@ Public Function DetectColumnChanges(src As String, tbl As ListObject) As String
         currentCols(LCase$(col.Name)) = col.Name
     Next col
 
-    ' Detect added columns
+    ' Detect added columns (skip hidden __ fields)
     Dim added As String
     For Each k In currentCols.keys
         If Not savedCols.Exists(CStr(k)) Then
-            added = added & "  + " & CStr(currentCols(k)) & vbCrLf
+            If Not IsHiddenField(CStr(currentCols(k))) Then
+                added = added & "  + " & CStr(currentCols(k)) & vbCrLf
+            End If
         End If
     Next k
 
@@ -854,51 +862,45 @@ Public Function DetectColumnChanges(src As String, tbl As ListObject) As String
 End Function
 
 Private Function SortedFieldNames(src As String, visibleOnly As Boolean) As Collection
-    Dim rows As Collection: Set rows = New Collection
+    ' Collect matching entries into a growable array
+    Dim cnt As Long: cnt = 0
+    Dim arrNames() As String, arrOrders() As Long
+    ReDim arrNames(0 To 15): ReDim arrOrders(0 To 15)
     Dim k As Variant
     For Each k In m_fields.keys
         If Left$(CStr(k), Len(src) + 1) = LCase$(src) & "|" Then
             Dim fd As Object: Set fd = m_fields(k)
             If Not visibleOnly Or DictBool(fd, "visible", True) Then
-                Dim entry As Object: Set entry = NewDict()
-                entry.Add "field_name", CStr(fd("field_name"))
-                entry.Add "sort_order", CLng(Val(DictStr(fd, "sort_order", "0")))
-                rows.Add entry
+                If cnt > UBound(arrNames) Then
+                    ReDim Preserve arrNames(0 To cnt * 2)
+                    ReDim Preserve arrOrders(0 To cnt * 2)
+                End If
+                arrNames(cnt) = CStr(fd("field_name"))
+                arrOrders(cnt) = CLng(Val(DictStr(fd, "sort_order", "0")))
+                cnt = cnt + 1
             End If
         End If
     Next k
 
+    ' Bubble sort on arrays (swappable, unlike Collection)
     Dim i As Long, j As Long
-    For i = 1 To rows.Count - 1
-        For j = i + 1 To rows.Count
-            If CLng(rows(j)("sort_order")) < CLng(rows(i)("sort_order")) Then
-                Dim tmp As Object: Set tmp = rows(i)
-                Set rows(i) = rows(j)
-                Set rows(j) = tmp
+    For i = 0 To cnt - 2
+        For j = i + 1 To cnt - 1
+            If arrOrders(j) < arrOrders(i) Then
+                Dim tmpN As String: tmpN = arrNames(i)
+                Dim tmpO As Long: tmpO = arrOrders(i)
+                arrNames(i) = arrNames(j): arrOrders(i) = arrOrders(j)
+                arrNames(j) = tmpN: arrOrders(j) = tmpO
             End If
         Next j
     Next i
 
     Set SortedFieldNames = New Collection
-    For i = 1 To rows.Count
-        SortedFieldNames.Add CStr(rows(i)("field_name"))
+    For i = 0 To cnt - 1
+        SortedFieldNames.Add arrNames(i)
     Next i
 End Function
 
-Private Function GuessFieldRole(src As String, fld As String) As String
-    Dim lowFld As String: lowFld = LCase$(fld)
-    If LCase$(GetSourceStr(src, "key_column")) = lowFld Then GuessFieldRole = "case_id": Exit Function
-    If LCase$(GetSourceStr(src, "display_name_column")) = lowFld Then GuessFieldRole = "title": Exit Function
-    If LCase$(GetSourceStr(src, "mail_link_column")) = lowFld Then GuessFieldRole = "mail_link": Exit Function
-    If LCase$(GetSourceStr(src, "folder_link_column")) = lowFld Then GuessFieldRole = "file_key": Exit Function
-
-    If InStr(lowFld, "status") > 0 Or InStr(lowFld, "状態") > 0 Then GuessFieldRole = "status": Exit Function
-    If InStr(lowFld, "updated") > 0 Or InStr(lowFld, "更新") > 0 Then GuessFieldRole = "updated_at": Exit Function
-    If InStr(lowFld, "title") > 0 Or InStr(lowFld, "name") > 0 Or InStr(lowFld, "件名") > 0 Then GuessFieldRole = "title": Exit Function
-    If InStr(lowFld, "id") > 0 Or InStr(lowFld, "案件") > 0 Then GuessFieldRole = "case_id": Exit Function
-    If InStr(lowFld, "mail") > 0 Or InStr(lowFld, "email") > 0 Then GuessFieldRole = "mail_link": Exit Function
-    If InStr(lowFld, "file") > 0 Or InStr(lowFld, "folder") > 0 Or InStr(lowFld, "path") > 0 Then GuessFieldRole = "file_key": Exit Function
-End Function
 
 Private Function GuessFieldType(col As ListColumn) As String
     GuessFieldType = "text"
@@ -1122,6 +1124,7 @@ Public Sub AddLogEntries(entries As Collection)
         startRow = 1
     Else
         startRow = tbl.ListRows.Count + 1
+        tbl.ListRows.Add
     End If
     ' Add remaining rows
     For i = 2 To n: tbl.ListRows.Add: Next i

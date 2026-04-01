@@ -16,10 +16,10 @@ Option Explicit
 
 Private WithEvents m_cmbSheet As MSForms.ComboBox
 Private WithEvents m_cmbTable As MSForms.ComboBox
-Private WithEvents m_cmbKeyCol As MSForms.ComboBox
-Private WithEvents m_cmbNameCol As MSForms.ComboBox
-Private WithEvents m_cmbMailCol As MSForms.ComboBox
-Private WithEvents m_cmbFolderCol As MSForms.ComboBox
+Private m_cmbKeyCol As MSForms.ComboBox
+Private m_cmbNameCol As MSForms.ComboBox
+Private m_cmbMailCol As MSForms.ComboBox
+Private m_cmbFolderCol As MSForms.ComboBox
 Private m_cmbMailMatchMode As MSForms.ComboBox
 Private WithEvents m_cmdBrowseMail As MSForms.CommandButton
 Private WithEvents m_cmdBrowseCase As MSForms.CommandButton
@@ -39,7 +39,6 @@ Private Const M As Long = 12
 Private Const LBL_W As Single = 84
 Private Const ROW_H As Single = 24
 Private Const GRID_ROW_H As Single = 22
-Private Const USED_RANGE_LABEL As String = "(UsedRange)"
 
 Private Sub UserForm_Initialize()
     Dim eh As New ErrorHandler: eh.Enter "frmSettings", "UserForm_Initialize"
@@ -62,50 +61,56 @@ Private Sub BuildLayout()
     Dim cw As Single: cw = Me.InsideWidth
     Dim ch As Single: ch = Me.InsideHeight
     Dim inputL As Single: inputL = M + LBL_W + 6
-    Dim inputW As Single: inputW = cw - inputL - M - 36
+    Dim btnW As Single: btnW = 32
+    Dim btnGap As Single: btnGap = 4
+    Dim fullW As Single: fullW = cw - inputL - M          ' full width (no button)
+    Dim inputW As Single: inputW = cw - inputL - M - btnW - btnGap  ' with browse button
     Dim y As Single
+
+    ' --- Measure bottom sections first to allocate Fields height ---
+    Dim bottomH As Single: bottomH = 20 + ROW_H * 2 + 8 + 36 + M  ' Paths section + buttons
 
     y = M
     AddSection Me, "secSrc", M, y, "Import source"
     y = y + 20
 
     AddLabel Me, "lblWb", M, y, LBL_W, "Workbook:"
-    Set m_lblDataWb = AddLabel(Me, "lblDataWbVal", inputL, y, inputW + 30, "")
+    Set m_lblDataWb = AddLabel(Me, "lblDataWbVal", inputL, y, fullW, "")
     m_lblDataWb.ForeColor = &H404040
     y = y + ROW_H
 
     AddLabel Me, "lblSheet", M, y, LBL_W, "Sheet:"
-    Set m_cmbSheet = AddCombo(Me, "cmbSheet", inputL, y, inputW + 30)
+    Set m_cmbSheet = AddCombo(Me, "cmbSheet", inputL, y, fullW)
     y = y + ROW_H
 
     AddLabel Me, "lblTable", M, y, LBL_W, "Table:"
-    Set m_cmbTable = AddCombo(Me, "cmbTable", inputL, y, inputW + 30)
+    Set m_cmbTable = AddCombo(Me, "cmbTable", inputL, y, fullW)
     y = y + ROW_H + 6
 
     AddSection Me, "secLink", M, y, "Roles"
     y = y + 20
 
     AddLabel Me, "lblKey", M, y, LBL_W, "Case ID:"
-    Set m_cmbKeyCol = AddCombo(Me, "cmbKey", inputL, y, inputW + 30)
+    Set m_cmbKeyCol = AddCombo(Me, "cmbKey", inputL, y, fullW)
     y = y + ROW_H
 
     AddLabel Me, "lblName", M, y, LBL_W, "Title:"
-    Set m_cmbNameCol = AddCombo(Me, "cmbName", inputL, y, inputW + 30)
+    Set m_cmbNameCol = AddCombo(Me, "cmbName", inputL, y, fullW)
     y = y + ROW_H
 
     AddLabel Me, "lblMailFld", M, y, LBL_W, "Mail field:"
-    Set m_cmbMailCol = AddCombo(Me, "cmbMailFld", inputL, y, inputW + 30)
+    Set m_cmbMailCol = AddCombo(Me, "cmbMailFld", inputL, y, fullW)
     y = y + ROW_H
 
     AddLabel Me, "lblMailMatch", M, y, LBL_W, "Mail match:"
-    Set m_cmbMailMatchMode = AddCombo(Me, "cmbMailMatch", inputL, y, inputW + 30)
+    Set m_cmbMailMatchMode = AddCombo(Me, "cmbMailMatch", inputL, y, fullW)
     m_cmbMailMatchMode.AddItem "exact"
     m_cmbMailMatchMode.AddItem "domain"
     m_cmbMailMatchMode.ListIndex = 0
     y = y + ROW_H
 
     AddLabel Me, "lblFolderFld", M, y, LBL_W, "File key:"
-    Set m_cmbFolderCol = AddCombo(Me, "cmbFolderFld", inputL, y, inputW + 30)
+    Set m_cmbFolderCol = AddCombo(Me, "cmbFolderFld", inputL, y, fullW)
     y = y + ROW_H + 6
 
     AddSection Me, "secFields", M, y, "Fields"
@@ -116,7 +121,7 @@ Private Sub BuildLayout()
         .Left = M
         .Top = y
         .Width = cw - M * 2
-        .Height = ch - y - 94
+        .Height = ch - y - bottomH
         .Caption = ""
         .BorderStyle = fmBorderStyleSingle
         .ScrollBars = fmScrollBarsVertical
@@ -129,14 +134,15 @@ Private Sub BuildLayout()
     AddSection Me, "secPath", M, y, "Paths"
     y = y + 20
 
+    Dim btnL As Single: btnL = inputL + inputW + btnGap
     AddLabel Me, "lblMailDir", M, y, LBL_W, "Mail folder:"
     Set m_txtMailFolder = AddTextBox(Me, "txtMailDir", inputL, y, inputW)
-    Set m_cmdBrowseMail = AddBtn(Me, "cmdBrMail", cw - M - 32, y, 32, 20, "...")
+    Set m_cmdBrowseMail = AddBtn(Me, "cmdBrMail", btnL, y, btnW, 20, "...")
     y = y + ROW_H
 
     AddLabel Me, "lblCaseDir", M, y, LBL_W, "Case folder:"
     Set m_txtCaseFolder = AddTextBox(Me, "txtCaseDir", inputL, y, inputW)
-    Set m_cmdBrowseCase = AddBtn(Me, "cmdBrCase", cw - M - 32, y, 32, 20, "...")
+    Set m_cmdBrowseCase = AddBtn(Me, "cmdBrCase", btnL, y, btnW, 20, "...")
 
     Set m_cmdSave = AddBtn(Me, "cmdSave", cw - 170, ch - 36, 75, 26, "Save")
     Set m_cmdCancel = AddBtn(Me, "cmdCancel", cw - 84, ch - 36, 75, 26, "Cancel")
@@ -267,6 +273,7 @@ End Sub
 
 Private Sub LoadTablesForSelectedSheet()
     m_cmbTable.Clear
+    m_cmbTable.Style = fmStyleDropDownList
     Dim wb As Workbook: Set wb = CaseDeskMain.g_dataWb
     If wb Is Nothing Then Exit Sub
     If m_cmbSheet.ListIndex < 0 Then Exit Sub
@@ -279,14 +286,15 @@ Private Sub LoadTablesForSelectedSheet()
     For Each tbl In ws.ListObjects
         m_cmbTable.AddItem tbl.Name
     Next tbl
-    ' If no tables, offer UsedRange as fallback
+    ' If no tables, show UsedRange address as editable suggestion
     If m_cmbTable.ListCount = 0 Then
+        m_cmbTable.Style = fmStyleDropDownCombo
         On Error Resume Next
         Dim ur As Range: Set ur = ws.UsedRange
         On Error GoTo 0
         If Not ur Is Nothing Then
             If ur.Rows.Count > 1 And ur.Columns.Count > 1 Then
-                m_cmbTable.AddItem USED_RANGE_LABEL
+                m_cmbTable.AddItem ur.Address(False, False)
             End If
         End If
     End If
@@ -297,24 +305,25 @@ Private Sub LoadColumns()
     m_cmbNameCol.Clear
     m_cmbMailCol.Clear
     m_cmbFolderCol.Clear
+    m_cmbMailMatchMode.ListIndex = 0
     Set m_colDisplayToRaw = CreateObject("Scripting.Dictionary")
-    If m_cmbTable.ListIndex < 0 Then Exit Sub
+    If Len(m_cmbTable.Text) = 0 Then Exit Sub
 
     Dim wb As Workbook: Set wb = CaseDeskMain.g_dataWb
     If wb Is Nothing Then Exit Sub
 
     Dim cols As Collection
-    If m_cmbTable.Text = USED_RANGE_LABEL Then
+    Dim tbl As ListObject: Set tbl = CaseDeskData.FindTable(wb, m_cmbTable.Text)
+    If Not tbl Is Nothing Then
+        Set cols = CaseDeskData.GetTableColumnNames(tbl)
+    Else
+        ' No table found — treat as range on selected sheet
         Dim ws As Worksheet
         On Error Resume Next
         Set ws = wb.Worksheets(m_cmbSheet.Text)
         On Error GoTo 0
         If ws Is Nothing Then Exit Sub
-        Set cols = CaseDeskData.GetUsedRangeColumnNames(ws)
-    Else
-        Dim tbl As ListObject: Set tbl = CaseDeskData.FindTable(wb, m_cmbTable.Text)
-        If tbl Is Nothing Then Exit Sub
-        Set cols = CaseDeskData.GetTableColumnNames(tbl)
+        Set cols = GetColumnsFromRange(ws, m_cmbTable.Text)
     End If
 
     Dim c As Variant
@@ -335,31 +344,31 @@ NextCol:
 End Sub
 
 Private Sub BuildFieldRows()
+    On Error Resume Next
     ClearFieldRows
-    If m_cmbTable.ListIndex < 0 Then Exit Sub
+    If Len(m_cmbTable.Text) = 0 Then Exit Sub
 
     Dim wb As Workbook: Set wb = CaseDeskMain.g_dataWb
     If wb Is Nothing Then Exit Sub
     Dim src As String: src = m_cmbTable.Text
-    Dim isUsedRange As Boolean: isUsedRange = (src = USED_RANGE_LABEL)
 
     CaseDeskLib.EnsureSource src
     CaseDeskLib.SetSourceStr src, "source_sheet", m_cmbSheet.Text
 
-    If isUsedRange Then
-        Dim ws As Worksheet
-        On Error Resume Next
-        Set ws = wb.Worksheets(m_cmbSheet.Text)
-        On Error GoTo 0
-        If ws Is Nothing Then Exit Sub
-        CaseDeskLib.InitFieldSettingsFromRange src, ws
-    Else
-        Dim tbl As ListObject: Set tbl = CaseDeskData.FindTable(wb, src)
-        If tbl Is Nothing Then Exit Sub
+    Dim tbl As ListObject: Set tbl = CaseDeskData.FindTable(wb, src)
+    If Not tbl Is Nothing Then
         Dim diffMsg As String: diffMsg = CaseDeskLib.DetectColumnChanges(src, tbl)
         CaseDeskLib.InitFieldSettingsFromTable src, tbl
         If Len(diffMsg) > 0 Then
             MsgBox "Column changes detected:" & vbCrLf & vbCrLf & diffMsg, vbInformation, "CaseDesk"
+        End If
+    Else
+        ' No table — init from range (user-specified or UsedRange)
+        Dim ws As Worksheet
+        Set ws = wb.Worksheets(m_cmbSheet.Text)
+        If Not ws Is Nothing Then
+            Dim cols As Collection: Set cols = GetColumnsFromRange(ws, src)
+            InitFieldsFromColumns src, cols, ws
         End If
     End If
 
@@ -402,6 +411,7 @@ Private Sub BuildFieldRows()
         cmbType.AddItem "text"
         cmbType.AddItem "multiline"
         cmbType.AddItem "number"
+        cmbType.AddItem "currency"
         cmbType.AddItem "date"
         cmbType.AddItem "boolean"
         cmbType.AddItem "choice"
@@ -441,6 +451,7 @@ NextField:
 
     ' Sync separate role ComboBoxes from field grid roles
     SyncRoleComboBoxes
+    On Error GoTo 0
 End Sub
 
 Private Sub SyncRoleComboBoxes()
@@ -498,21 +509,69 @@ Private Function ResolveRawColName(dispName As String) As String
     If m_colDisplayToRaw.Exists(dispName) Then ResolveRawColName = CStr(m_colDisplayToRaw(dispName))
 End Function
 
+Private Sub InitFieldsFromColumns(src As String, cols As Collection, ws As Worksheet)
+    Dim i As Long
+    For i = 1 To cols.Count
+        Dim colName As String: colName = CStr(cols(i))
+        If CaseDeskLib.IsHiddenField(colName) Then GoTo NextInitCol
+        CaseDeskLib.EnsureField src, colName
+        If Len(CaseDeskLib.GetFieldStr(src, colName, "sort_order")) = 0 Or _
+           CaseDeskLib.GetFieldStr(src, colName, "sort_order") = "0" Then
+            CaseDeskLib.SetFieldStr src, colName, "sort_order", CStr(i)
+        End If
+NextInitCol:
+    Next i
+End Sub
+
+Private Function GetColumnsFromRange(ws As Worksheet, rangeAddr As String) As Collection
+    Set GetColumnsFromRange = New Collection
+    On Error Resume Next
+    Dim rng As Range: Set rng = ws.Range(rangeAddr)
+    On Error GoTo 0
+    If rng Is Nothing Then
+        ' Invalid address — fall back to UsedRange
+        On Error Resume Next
+        Set rng = ws.UsedRange
+        On Error GoTo 0
+    End If
+    If rng Is Nothing Then Exit Function
+    If rng.Columns.Count < 1 Then Exit Function
+    ' Read entire header row at once (avoids cell-by-cell errors)
+    Dim headerData As Variant
+    If rng.Columns.Count = 1 Then
+        ReDim headerData(1 To 1, 1 To 1)
+        headerData(1, 1) = rng.Cells(1, 1).Value
+    Else
+        headerData = rng.Rows(1).Value
+    End If
+    Dim c As Long
+    For c = 1 To UBound(headerData, 2)
+        If Not IsEmpty(headerData(1, c)) Then
+            Dim v As String: v = CStr(headerData(1, c))
+            If Len(v) > 0 Then GetColumnsFromRange.Add v
+        End If
+    Next c
+End Function
+
 Private Sub m_cmbSheet_Change()
     If m_suppressEvents Then Exit Sub
     m_suppressEvents = True
+    On Error GoTo Cleanup
     LoadTablesForSelectedSheet
     If m_cmbTable.ListCount > 0 Then m_cmbTable.ListIndex = 0
     LoadColumns
     BuildFieldRows
+Cleanup:
     m_suppressEvents = False
 End Sub
 
 Private Sub m_cmbTable_Change()
     If m_suppressEvents Then Exit Sub
     m_suppressEvents = True
+    On Error GoTo Cleanup
     LoadColumns
     BuildFieldRows
+Cleanup:
     m_suppressEvents = False
 End Sub
 
@@ -612,11 +671,6 @@ Private Sub m_cmdSave_Click()
     eh.OK: Exit Sub
 ErrHandler:
     eh.Catch
-End Sub
-
-Private Sub ApplyRole(src As String, fld As String, roleName As String)
-    If Len(fld) = 0 Then Exit Sub
-    CaseDeskLib.SetFieldStr src, fld, "role", roleName
 End Sub
 
 Private Sub m_cmdCancel_Click()
