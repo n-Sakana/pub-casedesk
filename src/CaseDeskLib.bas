@@ -450,8 +450,8 @@ End Function
 
 Public Sub EnsureConfigSheets()
     EnsureSheet SH_CONFIG, Array("key", "value")
-    EnsureSheet SH_SOURCES, Array("source_name", "key_column", "display_name_column", "mail_link_column", "folder_link_column", "mail_match_mode")
-    EnsureSheet SH_FIELDS, Array("source_name", "field_name", "type", "in_list", "editable", "multiline")
+    EnsureSheet SH_SOURCES, Array("source_name", "source_sheet", "key_column", "display_name_column", "mail_link_column", "folder_link_column", "mail_match_mode")
+    EnsureSheet SH_FIELDS, Array("source_name", "field_name", "display_name", "type", "visible", "in_list", "editable", "multiline", "role", "sort_order")
     If Not m_loaded Then LoadFromSheets
 End Sub
 
@@ -610,14 +610,12 @@ End Sub
 
 Public Function GetFieldNames(src As String) As Collection
     If Not m_loaded Then EnsureConfigSheets
-    Set GetFieldNames = New Collection
-    Dim k As Variant
-    For Each k In m_fields.keys
-        If Left$(CStr(k), Len(src) + 1) = LCase$(src) & "|" Then
-            Dim fd As Object: Set fd = m_fields(k)
-            GetFieldNames.Add CStr(fd("field_name"))
-        End If
-    Next k
+    Set GetFieldNames = SortedFieldNames(src, False)
+End Function
+
+Public Function GetVisibleFieldNames(src As String) As Collection
+    If Not m_loaded Then EnsureConfigSheets
+    Set GetVisibleFieldNames = SortedFieldNames(src, True)
 End Function
 
 Public Function GetFieldStr(src As String, fld As String, col As String, Optional def As String = "") As String
@@ -659,12 +657,20 @@ End Sub
 Public Sub EnsureField(src As String, fld As String)
     Dim fk As String: fk = LCase$(src) & "|" & LCase$(fld)
     If Not m_fields.Exists(fk) Then
+        SetFieldStr src, fld, "display_name", StripFieldPrefix(fld)
         SetFieldStr src, fld, "type", "text"
+        SetFieldStr src, fld, "visible", CStr(True)
         SetFieldStr src, fld, "in_list", CStr(False)
         SetFieldStr src, fld, "editable", CStr(True)
         SetFieldStr src, fld, "multiline", CStr(False)
+        SetFieldStr src, fld, "role", ""
+        SetFieldStr src, fld, "sort_order", "0"
     End If
 End Sub
+
+Public Function GetFieldDisplayName(src As String, fld As String) As String
+    GetFieldDisplayName = GetFieldStr(src, fld, "display_name", StripFieldPrefix(fld))
+End Function
 
 ' ============================================================================
 ' Field Settings Auto-Init
@@ -676,7 +682,9 @@ Public Sub InitFieldSettingsFromTable(src As String, tbl As ListObject)
     ' Build set of current table columns
     Dim currentCols As Object: Set currentCols = CreateObject("Scripting.Dictionary")
     Dim col As ListColumn
+    Dim ordinal As Long: ordinal = 0
     For Each col In tbl.ListColumns
+        ordinal = ordinal + 1
         ' Track all columns (including hidden) for stale removal
         currentCols(LCase$(col.Name)) = col.Name
         ' Skip hidden (__AAA) fields from UI field list
@@ -686,9 +694,23 @@ Public Sub InitFieldSettingsFromTable(src As String, tbl As ListObject)
             EnsureField src, col.Name
             SetFieldStr src, col.Name, "type", GuessFieldType(col)
             SetFieldStr src, col.Name, "multiline", CStr(GuessMultiline(col))
+            SetFieldStr src, col.Name, "display_name", StripFieldPrefix(col.Name)
+            SetFieldStr src, col.Name, "visible", CStr(True)
+            SetFieldStr src, col.Name, "role", GuessFieldRole(src, col.Name)
+            SetFieldStr src, col.Name, "sort_order", CStr(ordinal)
             ' Read-only prefix (_xx_AAA) -> editable=False
             If IsReadOnlyField(col.Name) Then
                 SetFieldStr src, col.Name, "editable", CStr(False)
+            End If
+        Else
+            If Len(GetFieldStr(src, col.Name, "display_name")) = 0 Then
+                SetFieldStr src, col.Name, "display_name", StripFieldPrefix(col.Name)
+            End If
+            If Len(GetFieldStr(src, col.Name, "visible")) = 0 Then
+                SetFieldStr src, col.Name, "visible", CStr(True)
+            End If
+            If Len(GetFieldStr(src, col.Name, "sort_order")) = 0 Then
+                SetFieldStr src, col.Name, "sort_order", CStr(ordinal)
             End If
         End If
 NextCol:
@@ -710,6 +732,173 @@ NextCol:
         m_dirty = True
     Next ri
 End Sub
+
+Public Sub InitFieldSettingsFromRange(src As String, ws As Worksheet)
+    If Not m_loaded Then EnsureConfigSheets
+    On Error Resume Next
+    If ws.UsedRange Is Nothing Then Exit Sub
+    Dim ur As Range: Set ur = ws.UsedRange
+    On Error GoTo 0
+    If ur Is Nothing Then Exit Sub
+
+    Dim headerRow As Long: headerRow = ur.Row
+    Dim startCol As Long: startCol = ur.Column
+    Dim nCols As Long: nCols = ur.Columns.Count
+
+    ' Build set of current columns
+    Dim currentCols As Object: Set currentCols = CreateObject("Scripting.Dictionary")
+    Dim ordinal As Long: ordinal = 0
+    Dim c As Long
+    For c = 0 To nCols - 1
+        Dim colName As String
+        Dim cv As Variant: cv = ws.Cells(headerRow, startCol + c).Value
+        If IsEmpty(cv) Or Len(CStr(cv)) = 0 Then GoTo NextRangeCol
+        colName = CStr(cv)
+        ordinal = ordinal + 1
+        currentCols(LCase$(colName)) = colName
+
+        If IsHiddenField(colName) Then GoTo NextRangeCol
+        Dim fk As String: fk = LCase$(src) & "|" & LCase$(colName)
+        If Not m_fields.Exists(fk) Then
+            EnsureField src, colName
+            SetFieldStr src, colName, "display_name", StripFieldPrefix(colName)
+            SetFieldStr src, colName, "visible", CStr(True)
+            SetFieldStr src, colName, "role", GuessFieldRole(src, colName)
+            SetFieldStr src, colName, "sort_order", CStr(ordinal)
+            ' Guess type from cell data
+            Dim guessType As String: guessType = "text"
+            Dim sampleRow As Long: sampleRow = headerRow + 1
+            If sampleRow <= ws.Cells(ws.Rows.Count, startCol + c).End(xlUp).Row Then
+                Dim sv As Variant: sv = ws.Cells(sampleRow, startCol + c).Value
+                If Not IsEmpty(sv) And Not IsNull(sv) Then
+                    If VarType(sv) = vbDate Then guessType = "date"
+                    If VarType(sv) = vbDouble Or VarType(sv) = vbLong Or VarType(sv) = vbInteger Then guessType = "number"
+                End If
+            End If
+            SetFieldStr src, colName, "type", guessType
+            If IsReadOnlyField(colName) Then
+                SetFieldStr src, colName, "editable", CStr(False)
+            End If
+        Else
+            If Len(GetFieldStr(src, colName, "display_name")) = 0 Then
+                SetFieldStr src, colName, "display_name", StripFieldPrefix(colName)
+            End If
+            If Len(GetFieldStr(src, colName, "sort_order")) = 0 Then
+                SetFieldStr src, colName, "sort_order", CStr(ordinal)
+            End If
+        End If
+NextRangeCol:
+    Next c
+
+    ' Remove stale field entries
+    Dim prefix As String: prefix = LCase$(src) & "|"
+    Dim toRemove As New Collection
+    Dim k As Variant
+    For Each k In m_fields.keys
+        If Left$(CStr(k), Len(prefix)) = prefix Then
+            Dim cn As String: cn = Mid$(CStr(k), Len(prefix) + 1)
+            If Not currentCols.Exists(cn) Then toRemove.Add CStr(k)
+        End If
+    Next k
+    Dim ri As Long
+    For ri = 1 To toRemove.Count
+        m_fields.Remove CStr(toRemove(ri))
+        m_dirty = True
+    Next ri
+End Sub
+
+Public Function DetectColumnChanges(src As String, tbl As ListObject) As String
+    If Not m_loaded Then EnsureConfigSheets
+    DetectColumnChanges = ""
+
+    ' Get saved field names for this source
+    Dim prefix As String: prefix = LCase$(src) & "|"
+    Dim savedCols As Object: Set savedCols = CreateObject("Scripting.Dictionary")
+    Dim k As Variant
+    For Each k In m_fields.keys
+        If Left$(CStr(k), Len(prefix)) = prefix Then
+            Dim savedName As String: savedName = Mid$(CStr(k), Len(prefix) + 1)
+            savedCols(savedName) = True
+        End If
+    Next k
+    If savedCols.Count = 0 Then Exit Function ' First time, no diff
+
+    ' Get current table columns
+    Dim currentCols As Object: Set currentCols = CreateObject("Scripting.Dictionary")
+    Dim col As ListColumn
+    For Each col In tbl.ListColumns
+        currentCols(LCase$(col.Name)) = col.Name
+    Next col
+
+    ' Detect added columns
+    Dim added As String
+    For Each k In currentCols.keys
+        If Not savedCols.Exists(CStr(k)) Then
+            added = added & "  + " & CStr(currentCols(k)) & vbCrLf
+        End If
+    Next k
+
+    ' Detect removed columns
+    Dim removed As String
+    For Each k In savedCols.keys
+        If Not currentCols.Exists(CStr(k)) Then
+            ' Resolve original casing from saved data
+            Dim fd As Object: Set fd = m_fields(prefix & CStr(k))
+            Dim origName As String: origName = DictStr(fd, "field_name", CStr(k))
+            removed = removed & "  - " & origName & vbCrLf
+        End If
+    Next k
+
+    If Len(added) > 0 Then DetectColumnChanges = "Added:" & vbCrLf & added
+    If Len(removed) > 0 Then DetectColumnChanges = DetectColumnChanges & "Removed:" & vbCrLf & removed
+End Function
+
+Private Function SortedFieldNames(src As String, visibleOnly As Boolean) As Collection
+    Dim rows As Collection: Set rows = New Collection
+    Dim k As Variant
+    For Each k In m_fields.keys
+        If Left$(CStr(k), Len(src) + 1) = LCase$(src) & "|" Then
+            Dim fd As Object: Set fd = m_fields(k)
+            If Not visibleOnly Or DictBool(fd, "visible", True) Then
+                Dim entry As Object: Set entry = NewDict()
+                entry.Add "field_name", CStr(fd("field_name"))
+                entry.Add "sort_order", CLng(Val(DictStr(fd, "sort_order", "0")))
+                rows.Add entry
+            End If
+        End If
+    Next k
+
+    Dim i As Long, j As Long
+    For i = 1 To rows.Count - 1
+        For j = i + 1 To rows.Count
+            If CLng(rows(j)("sort_order")) < CLng(rows(i)("sort_order")) Then
+                Dim tmp As Object: Set tmp = rows(i)
+                Set rows(i) = rows(j)
+                Set rows(j) = tmp
+            End If
+        Next j
+    Next i
+
+    Set SortedFieldNames = New Collection
+    For i = 1 To rows.Count
+        SortedFieldNames.Add CStr(rows(i)("field_name"))
+    Next i
+End Function
+
+Private Function GuessFieldRole(src As String, fld As String) As String
+    Dim lowFld As String: lowFld = LCase$(fld)
+    If LCase$(GetSourceStr(src, "key_column")) = lowFld Then GuessFieldRole = "case_id": Exit Function
+    If LCase$(GetSourceStr(src, "display_name_column")) = lowFld Then GuessFieldRole = "title": Exit Function
+    If LCase$(GetSourceStr(src, "mail_link_column")) = lowFld Then GuessFieldRole = "mail_link": Exit Function
+    If LCase$(GetSourceStr(src, "folder_link_column")) = lowFld Then GuessFieldRole = "file_key": Exit Function
+
+    If InStr(lowFld, "status") > 0 Or InStr(lowFld, "状態") > 0 Then GuessFieldRole = "status": Exit Function
+    If InStr(lowFld, "updated") > 0 Or InStr(lowFld, "更新") > 0 Then GuessFieldRole = "updated_at": Exit Function
+    If InStr(lowFld, "title") > 0 Or InStr(lowFld, "name") > 0 Or InStr(lowFld, "件名") > 0 Then GuessFieldRole = "title": Exit Function
+    If InStr(lowFld, "id") > 0 Or InStr(lowFld, "案件") > 0 Then GuessFieldRole = "case_id": Exit Function
+    If InStr(lowFld, "mail") > 0 Or InStr(lowFld, "email") > 0 Then GuessFieldRole = "mail_link": Exit Function
+    If InStr(lowFld, "file") > 0 Or InStr(lowFld, "folder") > 0 Or InStr(lowFld, "path") > 0 Then GuessFieldRole = "file_key": Exit Function
+End Function
 
 Private Function GuessFieldType(col As ListColumn) As String
     GuessFieldType = "text"
@@ -764,11 +953,23 @@ Private Sub EnsureSheet(shName As String, headers As Variant)
         Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
         ws.Name = shName
         ws.Visible = xlSheetVeryHidden
-        Dim i As Long
-        For i = 0 To UBound(headers)
-            ws.Cells(1, i + 1).Value = headers(i)
-        Next i
     End If
+
+    Dim existing As Object: Set existing = CreateObject("Scripting.Dictionary")
+    Dim lastCol As Long: lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+    If lastCol < 1 Then lastCol = 0
+    Dim c As Long
+    For c = 1 To lastCol
+        If Len(CStr(ws.Cells(1, c).Value)) > 0 Then existing(CStr(ws.Cells(1, c).Value)) = c
+    Next c
+
+    Dim i As Long
+    For i = 0 To UBound(headers)
+        If Not existing.Exists(CStr(headers(i))) Then
+            ws.Cells(1, lastCol + 1).Value = CStr(headers(i))
+            lastCol = lastCol + 1
+        End If
+    Next i
 End Sub
 
 Private Sub SaveConfigSheet()

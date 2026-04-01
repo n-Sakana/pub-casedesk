@@ -1,10 +1,10 @@
 VERSION 5.00
 Begin {C62A69F0-16DC-11CE-9E0D-00AA006002F3} frmSettings
    Caption         =   "Settings"
-   ClientHeight    =   4800
+   ClientHeight    =   8400
    ClientLeft      =   120
    ClientTop       =   465
-   ClientWidth     =   6400
+   ClientWidth     =   10800
    StartUpPosition =   1  'CenterOwner
 End
 Attribute VB_Name = "frmSettings"
@@ -14,9 +14,7 @@ Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
 Option Explicit
 
-' ============================================================================
-' Controls
-' ============================================================================
+Private WithEvents m_cmbSheet As MSForms.ComboBox
 Private WithEvents m_cmbTable As MSForms.ComboBox
 Private WithEvents m_cmbKeyCol As MSForms.ComboBox
 Private WithEvents m_cmbNameCol As MSForms.ComboBox
@@ -31,108 +29,118 @@ Private WithEvents m_cmdCancel As MSForms.CommandButton
 Private m_lblDataWb As MSForms.Label
 Private m_txtMailFolder As MSForms.TextBox
 Private m_txtCaseFolder As MSForms.TextBox
+Private m_fraFields As MSForms.Frame
 
-' ============================================================================
-' State
-' ============================================================================
 Private m_suppressEvents As Boolean
-Private m_colDisplayToRaw As Object  ' Dict: stripped display name -> raw column name
+Private m_colDisplayToRaw As Object
+Private m_fieldRows As Object
 
 Private Const M As Long = 12
-Private Const LBL_W As Single = 80
-Private Const ROW_H As Single = 28
-
-' ============================================================================
-' Initialize
-' ============================================================================
+Private Const LBL_W As Single = 84
+Private Const ROW_H As Single = 24
+Private Const GRID_ROW_H As Single = 22
+Private Const USED_RANGE_LABEL As String = "(UsedRange)"
 
 Private Sub UserForm_Initialize()
     Dim eh As New ErrorHandler: eh.Enter "frmSettings", "UserForm_Initialize"
     On Error GoTo ErrHandler
-    Me.Width = 440: Me.Height = 400
+    Me.Width = 860
+    Me.Height = 640
+    Me.BackColor = &HFFFFFF
     m_suppressEvents = True
     Set m_colDisplayToRaw = CreateObject("Scripting.Dictionary")
+    Set m_fieldRows = CreateObject("Scripting.Dictionary")
     BuildLayout
     LoadConfig
     m_suppressEvents = False
     eh.OK: Exit Sub
-ErrHandler: eh.Catch
+ErrHandler:
+    eh.Catch
 End Sub
 
-' ============================================================================
-' Layout
-' ============================================================================
-
 Private Sub BuildLayout()
-    Me.BackColor = &HFFFFFF
     Dim cw As Single: cw = Me.InsideWidth
     Dim ch As Single: ch = Me.InsideHeight
-
-    Dim pw As Single: pw = cw - M * 2
-    Dim inputL As Single: inputL = M + LBL_W + 4
-    Dim inputW As Single: inputW = pw - inputL
+    Dim inputL As Single: inputL = M + LBL_W + 6
+    Dim inputW As Single: inputW = cw - inputL - M - 36
     Dim y As Single
 
     y = M
-    AddSection Me, "secSrc", M, y, "Source"
+    AddSection Me, "secSrc", M, y, "Import source"
     y = y + 20
 
-    ' Show data workbook name (read-only)
     AddLabel Me, "lblWb", M, y, LBL_W, "Workbook:"
-    Set m_lblDataWb = AddLabel(Me, "lblDataWbVal", inputL, y, inputW, 14)
+    Set m_lblDataWb = AddLabel(Me, "lblDataWbVal", inputL, y, inputW + 30, "")
     m_lblDataWb.ForeColor = &H404040
     y = y + ROW_H
 
+    AddLabel Me, "lblSheet", M, y, LBL_W, "Sheet:"
+    Set m_cmbSheet = AddCombo(Me, "cmbSheet", inputL, y, inputW + 30)
+    y = y + ROW_H
+
     AddLabel Me, "lblTable", M, y, LBL_W, "Table:"
-    Set m_cmbTable = AddCombo(Me, "cmbTable", inputL, y, inputW)
-    y = y + ROW_H
+    Set m_cmbTable = AddCombo(Me, "cmbTable", inputL, y, inputW + 30)
+    y = y + ROW_H + 6
 
-    AddLabel Me, "lblKey", M, y, LBL_W, "Key column:"
-    Set m_cmbKeyCol = AddCombo(Me, "cmbKey", inputL, y, inputW)
-    y = y + ROW_H
-
-    AddLabel Me, "lblName", M, y, LBL_W, "Name column:"
-    Set m_cmbNameCol = AddCombo(Me, "cmbName", inputL, y, inputW)
-    y = y + ROW_H + 8
-
-    AddSection Me, "secLink", M, y, "Link fields"
+    AddSection Me, "secLink", M, y, "Roles"
     y = y + 20
 
+    AddLabel Me, "lblKey", M, y, LBL_W, "Case ID:"
+    Set m_cmbKeyCol = AddCombo(Me, "cmbKey", inputL, y, inputW + 30)
+    y = y + ROW_H
+
+    AddLabel Me, "lblName", M, y, LBL_W, "Title:"
+    Set m_cmbNameCol = AddCombo(Me, "cmbName", inputL, y, inputW + 30)
+    y = y + ROW_H
+
     AddLabel Me, "lblMailFld", M, y, LBL_W, "Mail field:"
-    Set m_cmbMailCol = AddCombo(Me, "cmbMailFld", inputL, y, inputW)
+    Set m_cmbMailCol = AddCombo(Me, "cmbMailFld", inputL, y, inputW + 30)
     y = y + ROW_H
 
     AddLabel Me, "lblMailMatch", M, y, LBL_W, "Mail match:"
-    Set m_cmbMailMatchMode = AddCombo(Me, "cmbMailMatch", inputL, y, inputW)
+    Set m_cmbMailMatchMode = AddCombo(Me, "cmbMailMatch", inputL, y, inputW + 30)
     m_cmbMailMatchMode.AddItem "exact"
     m_cmbMailMatchMode.AddItem "domain"
     m_cmbMailMatchMode.ListIndex = 0
     y = y + ROW_H
 
-    AddLabel Me, "lblFolderFld", M, y, LBL_W, "Folder field:"
-    Set m_cmbFolderCol = AddCombo(Me, "cmbFolderFld", inputL, y, inputW)
-    y = y + ROW_H + 8
+    AddLabel Me, "lblFolderFld", M, y, LBL_W, "File key:"
+    Set m_cmbFolderCol = AddCombo(Me, "cmbFolderFld", inputL, y, inputW + 30)
+    y = y + ROW_H + 6
+
+    AddSection Me, "secFields", M, y, "Fields"
+    y = y + 20
+
+    Set m_fraFields = Me.Controls.Add("Forms.Frame.1", "fraFields")
+    With m_fraFields
+        .Left = M
+        .Top = y
+        .Width = cw - M * 2
+        .Height = ch - y - 94
+        .Caption = ""
+        .BorderStyle = fmBorderStyleSingle
+        .ScrollBars = fmScrollBarsVertical
+        .KeepScrollBarsVisible = fmScrollBarsNone
+        .SpecialEffect = fmSpecialEffectFlat
+        .BackColor = &HFFFFFF
+    End With
+    y = y + m_fraFields.Height + 8
 
     AddSection Me, "secPath", M, y, "Paths"
     y = y + 20
 
     AddLabel Me, "lblMailDir", M, y, LBL_W, "Mail folder:"
-    Set m_txtMailFolder = AddTextBox(Me, "txtMailDir", inputL, y, inputW - 36)
+    Set m_txtMailFolder = AddTextBox(Me, "txtMailDir", inputL, y, inputW)
     Set m_cmdBrowseMail = AddBtn(Me, "cmdBrMail", cw - M - 32, y, 32, 20, "...")
     y = y + ROW_H
 
     AddLabel Me, "lblCaseDir", M, y, LBL_W, "Case folder:"
-    Set m_txtCaseFolder = AddTextBox(Me, "txtCaseDir", inputL, y, inputW - 36)
+    Set m_txtCaseFolder = AddTextBox(Me, "txtCaseDir", inputL, y, inputW)
     Set m_cmdBrowseCase = AddBtn(Me, "cmdBrCase", cw - M - 32, y, 32, 20, "...")
 
-    ' --- Buttons ---
     Set m_cmdSave = AddBtn(Me, "cmdSave", cw - 170, ch - 36, 75, 26, "Save")
     Set m_cmdCancel = AddBtn(Me, "cmdCancel", cw - 84, ch - 36, 75, 26, "Cancel")
 End Sub
-
-' ============================================================================
-' Factory helpers
-' ============================================================================
 
 Private Function AddSection(container As Object, nm As String, l As Single, t As Single, cap As String) As MSForms.Label
     Set AddSection = container.Controls.Add("Forms.Label.1", nm)
@@ -182,14 +190,19 @@ Private Function AddBtn(container As Object, nm As String, l As Single, t As Sin
     End With
 End Function
 
-' ============================================================================
-' Config
-' ============================================================================
+Private Function AddCheck(container As Object, nm As String, l As Single, t As Single, cap As String) As MSForms.CheckBox
+    Set AddCheck = container.Controls.Add("Forms.CheckBox.1", nm)
+    With AddCheck
+        .Left = l: .Top = t: .Width = 70: .Height = 16
+        .Caption = cap
+        .Font.Name = "Meiryo UI": .Font.Size = 8
+        .BackStyle = fmBackStyleTransparent
+    End With
+End Function
 
 Private Sub LoadConfig()
     m_suppressEvents = True
 
-    ' Show data workbook name
     If Not CaseDeskMain.g_dataWb Is Nothing Then
         m_lblDataWb.Caption = CaseDeskMain.g_dataWb.Name
     Else
@@ -199,32 +212,84 @@ Private Sub LoadConfig()
     m_txtMailFolder.Text = CaseDeskLib.GetStr("mail_folder")
     m_txtCaseFolder.Text = CaseDeskLib.GetStr("case_folder_root")
 
-    ' Load tables from data workbook
-    LoadTables
+    PopulateSheets
 
-    ' Restore selected source
+    Dim savedSource As String: savedSource = ""
     Dim sources As Collection: Set sources = CaseDeskLib.GetSourceNames()
-    If sources.Count > 0 Then
-        SelectComboItem m_cmbTable, CStr(sources(1))
-        LoadColumns
-        Dim src As String: src = CStr(sources(1))
-        SelectComboItem m_cmbKeyCol, CaseDeskLib.GetSourceStr(src, "key_column")
-        SelectComboItem m_cmbNameCol, CaseDeskLib.GetSourceStr(src, "display_name_column")
-        SelectComboItem m_cmbMailCol, CaseDeskLib.GetSourceStr(src, "mail_link_column")
-        SelectComboItem m_cmbMailMatchMode, CaseDeskLib.GetSourceStr(src, "mail_match_mode", "exact")
-        SelectComboItem m_cmbFolderCol, CaseDeskLib.GetSourceStr(src, "folder_link_column")
+    If sources.Count > 0 Then savedSource = CStr(sources(1))
+
+    Dim savedSheet As String
+    If Len(savedSource) > 0 Then savedSheet = CaseDeskLib.GetSourceStr(savedSource, "source_sheet")
+    If Len(savedSheet) = 0 Then savedSheet = GuessFirstSheetName()
+    SelectComboItem m_cmbSheet, savedSheet
+
+    LoadTablesForSelectedSheet
+    If Len(savedSource) > 0 Then
+        SelectComboItem m_cmbTable, savedSource
+    End If
+    If m_cmbTable.ListIndex < 0 And m_cmbTable.ListCount > 0 Then m_cmbTable.ListIndex = 0
+
+    LoadColumns
+    If Len(savedSource) = 0 Then savedSource = m_cmbTable.Text
+    If Len(savedSource) > 0 Then
+        SelectComboItem m_cmbKeyCol, CaseDeskLib.GetSourceStr(savedSource, "key_column")
+        SelectComboItem m_cmbNameCol, CaseDeskLib.GetSourceStr(savedSource, "display_name_column")
+        SelectComboItem m_cmbMailCol, CaseDeskLib.GetSourceStr(savedSource, "mail_link_column")
+        SelectComboItem m_cmbMailMatchMode, CaseDeskLib.GetSourceStr(savedSource, "mail_match_mode", "exact")
+        SelectComboItem m_cmbFolderCol, CaseDeskLib.GetSourceStr(savedSource, "folder_link_column")
     End If
 
+    BuildFieldRows
     m_suppressEvents = False
 End Sub
 
-Private Sub LoadTables()
+Private Function GuessFirstSheetName() As String
+    Dim wb As Workbook: Set wb = CaseDeskMain.g_dataWb
+    If wb Is Nothing Then Exit Function
+    Dim ws As Worksheet
+    For Each ws In wb.Worksheets
+        If ws.Visible = xlSheetVisible Then
+            GuessFirstSheetName = ws.Name
+            Exit Function
+        End If
+    Next ws
+End Function
+
+Private Sub PopulateSheets()
+    m_cmbSheet.Clear
+    Dim wb As Workbook: Set wb = CaseDeskMain.g_dataWb
+    If wb Is Nothing Then Exit Sub
+    Dim ws As Worksheet
+    For Each ws In wb.Worksheets
+        If ws.Visible = xlSheetVisible Then m_cmbSheet.AddItem ws.Name
+    Next ws
+End Sub
+
+Private Sub LoadTablesForSelectedSheet()
     m_cmbTable.Clear
     Dim wb As Workbook: Set wb = CaseDeskMain.g_dataWb
     If wb Is Nothing Then Exit Sub
-    Dim names As Collection: Set names = CaseDeskData.GetWorkbookTableNames(wb)
-    Dim n As Variant
-    For Each n In names: m_cmbTable.AddItem CStr(n): Next n
+    If m_cmbSheet.ListIndex < 0 Then Exit Sub
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = wb.Worksheets(m_cmbSheet.Text)
+    On Error GoTo 0
+    If ws Is Nothing Then Exit Sub
+    Dim tbl As ListObject
+    For Each tbl In ws.ListObjects
+        m_cmbTable.AddItem tbl.Name
+    Next tbl
+    ' If no tables, offer UsedRange as fallback
+    If m_cmbTable.ListCount = 0 Then
+        On Error Resume Next
+        Dim ur As Range: Set ur = ws.UsedRange
+        On Error GoTo 0
+        If Not ur Is Nothing Then
+            If ur.Rows.Count > 1 And ur.Columns.Count > 1 Then
+                m_cmbTable.AddItem USED_RANGE_LABEL
+            End If
+        End If
+    End If
 End Sub
 
 Private Sub LoadColumns()
@@ -237,29 +302,189 @@ Private Sub LoadColumns()
 
     Dim wb As Workbook: Set wb = CaseDeskMain.g_dataWb
     If wb Is Nothing Then Exit Sub
-    Dim tbl As ListObject: Set tbl = CaseDeskData.FindTable(wb, m_cmbTable.Text)
-    If tbl Is Nothing Then Exit Sub
 
-    Dim cols As Collection: Set cols = CaseDeskData.GetTableColumnNames(tbl)
+    Dim cols As Collection
+    If m_cmbTable.Text = USED_RANGE_LABEL Then
+        Dim ws As Worksheet
+        On Error Resume Next
+        Set ws = wb.Worksheets(m_cmbSheet.Text)
+        On Error GoTo 0
+        If ws Is Nothing Then Exit Sub
+        Set cols = CaseDeskData.GetUsedRangeColumnNames(ws)
+    Else
+        Dim tbl As ListObject: Set tbl = CaseDeskData.FindTable(wb, m_cmbTable.Text)
+        If tbl Is Nothing Then Exit Sub
+        Set cols = CaseDeskData.GetTableColumnNames(tbl)
+    End If
+
     Dim c As Variant
     m_cmbKeyCol.AddItem "": m_cmbNameCol.AddItem ""
     m_cmbMailCol.AddItem "": m_cmbFolderCol.AddItem ""
     For Each c In cols
         Dim rawName As String: rawName = CStr(c)
+        If CaseDeskLib.IsHiddenField(rawName) Then GoTo NextCol
         Dim dispName As String: dispName = CaseDeskLib.StripFieldPrefix(rawName)
-        ' If stripped name collides, use raw name to avoid ambiguity
         If m_colDisplayToRaw.Exists(dispName) Then dispName = rawName
         m_colDisplayToRaw(dispName) = rawName
         m_cmbKeyCol.AddItem dispName
         m_cmbNameCol.AddItem dispName
         m_cmbMailCol.AddItem dispName
         m_cmbFolderCol.AddItem dispName
+NextCol:
     Next c
+End Sub
+
+Private Sub BuildFieldRows()
+    ClearFieldRows
+    If m_cmbTable.ListIndex < 0 Then Exit Sub
+
+    Dim wb As Workbook: Set wb = CaseDeskMain.g_dataWb
+    If wb Is Nothing Then Exit Sub
+    Dim src As String: src = m_cmbTable.Text
+    Dim isUsedRange As Boolean: isUsedRange = (src = USED_RANGE_LABEL)
+
+    CaseDeskLib.EnsureSource src
+    CaseDeskLib.SetSourceStr src, "source_sheet", m_cmbSheet.Text
+
+    If isUsedRange Then
+        Dim ws As Worksheet
+        On Error Resume Next
+        Set ws = wb.Worksheets(m_cmbSheet.Text)
+        On Error GoTo 0
+        If ws Is Nothing Then Exit Sub
+        CaseDeskLib.InitFieldSettingsFromRange src, ws
+    Else
+        Dim tbl As ListObject: Set tbl = CaseDeskData.FindTable(wb, src)
+        If tbl Is Nothing Then Exit Sub
+        Dim diffMsg As String: diffMsg = CaseDeskLib.DetectColumnChanges(src, tbl)
+        CaseDeskLib.InitFieldSettingsFromTable src, tbl
+        If Len(diffMsg) > 0 Then
+            MsgBox "Column changes detected:" & vbCrLf & vbCrLf & diffMsg, vbInformation, "CaseDesk"
+        End If
+    End If
+
+    Dim xRaw As Single: xRaw = 8
+    Dim xDisp As Single: xDisp = 152
+    Dim xVisible As Single: xVisible = 326
+    Dim xEditable As Single: xEditable = 384
+    Dim xType As Single: xType = 444
+    Dim xRole As Single: xRole = 564
+    Dim y As Single: y = 8
+
+    AddHeader xRaw, xDisp, xVisible, xEditable, xType, xRole
+    y = y + 18
+
+    Dim fields As Collection: Set fields = CaseDeskLib.GetFieldNames(src)
+    Dim i As Long
+    For i = 1 To fields.Count
+        Dim fld As String: fld = CStr(fields(i))
+        If CaseDeskLib.IsHiddenField(fld) Then GoTo NextField
+
+        Dim lblRaw As MSForms.Label
+        Set lblRaw = AddLabel(m_fraFields, "lblRaw_" & CStr(i), xRaw, y, 140, fld)
+        lblRaw.Font.Size = 8
+
+        Dim txtDisp As MSForms.TextBox
+        Set txtDisp = AddTextBox(m_fraFields, "txtDisp_" & CStr(i), xDisp, y - 1, 168)
+        txtDisp.Text = CaseDeskLib.GetFieldDisplayName(src, fld)
+
+        Dim chkVisible As MSForms.CheckBox
+        Set chkVisible = AddCheck(m_fraFields, "chkVisible_" & CStr(i), xVisible, y + 1, "")
+        chkVisible.Value = CaseDeskLib.GetFieldBool(src, fld, "visible", True)
+
+        Dim chkEditable As MSForms.CheckBox
+        Set chkEditable = AddCheck(m_fraFields, "chkEditable_" & CStr(i), xEditable, y + 1, "")
+        chkEditable.Value = CaseDeskLib.GetFieldBool(src, fld, "editable", True)
+        If CaseDeskLib.IsReadOnlyField(fld) Then chkEditable.Value = False
+
+        Dim cmbType As MSForms.ComboBox
+        Set cmbType = AddCombo(m_fraFields, "cmbType_" & CStr(i), xType, y - 1, 116)
+        cmbType.AddItem "text"
+        cmbType.AddItem "multiline"
+        cmbType.AddItem "number"
+        cmbType.AddItem "date"
+        cmbType.AddItem "boolean"
+        cmbType.AddItem "choice"
+        cmbType.AddItem "path/url"
+        Dim savedType As String: savedType = CaseDeskLib.GetFieldStr(src, fld, "type", "text")
+        If CaseDeskLib.GetFieldBool(src, fld, "multiline") Then savedType = "multiline"
+        SelectComboItem cmbType, savedType
+        If cmbType.ListIndex < 0 Then cmbType.ListIndex = 0
+
+        Dim cmbRole As MSForms.ComboBox
+        Set cmbRole = AddCombo(m_fraFields, "cmbRole_" & CStr(i), xRole, y - 1, 120)
+        cmbRole.AddItem ""
+        cmbRole.AddItem "case_id"
+        cmbRole.AddItem "title"
+        cmbRole.AddItem "status"
+        cmbRole.AddItem "file_key"
+        cmbRole.AddItem "updated_at"
+        cmbRole.AddItem "mail_link"
+        Dim savedRole As String: savedRole = CaseDeskLib.GetFieldStr(src, fld, "role")
+        SelectComboItem cmbRole, savedRole
+        If cmbRole.ListIndex < 0 Then cmbRole.ListIndex = 0
+
+        Dim row As Object: Set row = CreateObject("Scripting.Dictionary")
+        Set row("display") = txtDisp
+        Set row("visible") = chkVisible
+        Set row("editable") = chkEditable
+        Set row("type") = cmbType
+        Set row("role") = cmbRole
+        row("order") = CStr(i)
+        m_fieldRows(fld) = row
+
+        y = y + GRID_ROW_H
+NextField:
+    Next i
+
+    m_fraFields.ScrollHeight = y + 8
+
+    ' Sync separate role ComboBoxes from field grid roles
+    SyncRoleComboBoxes
+End Sub
+
+Private Sub SyncRoleComboBoxes()
+    Dim fld As Variant
+    For Each fld In m_fieldRows.Keys
+        Dim row As Object: Set row = m_fieldRows(fld)
+        Dim roleName As String: roleName = CStr(row("role").Text)
+        Dim rawName As String: rawName = CStr(fld)
+        Dim dispName As String: dispName = CaseDeskLib.StripFieldPrefix(rawName)
+        Select Case roleName
+            Case "case_id":  SelectComboItem m_cmbKeyCol, dispName
+            Case "title":    SelectComboItem m_cmbNameCol, dispName
+            Case "mail_link": SelectComboItem m_cmbMailCol, dispName
+            Case "file_key": SelectComboItem m_cmbFolderCol, dispName
+        End Select
+    Next fld
+End Sub
+
+Private Sub AddHeader(xRaw As Single, xDisp As Single, xVisible As Single, xEditable As Single, xType As Single, xRole As Single)
+    Dim lbl As MSForms.Label
+    Set lbl = AddLabel(m_fraFields, "hdrRaw", xRaw, 8, 140, "Column")
+    lbl.Font.Bold = True: lbl.Font.Size = 8
+    Set lbl = AddLabel(m_fraFields, "hdrDisp", xDisp, 8, 168, "Display name")
+    lbl.Font.Bold = True: lbl.Font.Size = 8
+    Set lbl = AddLabel(m_fraFields, "hdrVis", xVisible, 8, 54, "Visible")
+    lbl.Font.Bold = True: lbl.Font.Size = 8
+    Set lbl = AddLabel(m_fraFields, "hdrEdit", xEditable, 8, 56, "Editable")
+    lbl.Font.Bold = True: lbl.Font.Size = 8
+    Set lbl = AddLabel(m_fraFields, "hdrType", xType, 8, 116, "Data type")
+    lbl.Font.Bold = True: lbl.Font.Size = 8
+    Set lbl = AddLabel(m_fraFields, "hdrRole", xRole, 8, 120, "Role")
+    lbl.Font.Bold = True: lbl.Font.Size = 8
+End Sub
+
+Private Sub ClearFieldRows()
+    Set m_fieldRows = CreateObject("Scripting.Dictionary")
+    Do While m_fraFields.Controls.Count > 0
+        m_fraFields.Controls.Remove 0
+    Loop
+    m_fraFields.ScrollTop = 0
 End Sub
 
 Private Sub SelectComboItem(cmb As MSForms.ComboBox, val As String)
     If Len(val) = 0 Then Exit Sub
-    ' Match by stripped display name (stored value may have prefix)
     Dim dispVal As String: dispVal = CaseDeskLib.StripFieldPrefix(val)
     Dim i As Long
     For i = 0 To cmb.ListCount - 1
@@ -267,13 +492,28 @@ Private Sub SelectComboItem(cmb As MSForms.ComboBox, val As String)
     Next i
 End Sub
 
-' ============================================================================
-' Events
-' ============================================================================
+Private Function ResolveRawColName(dispName As String) As String
+    ResolveRawColName = dispName
+    If m_colDisplayToRaw Is Nothing Then Exit Function
+    If m_colDisplayToRaw.Exists(dispName) Then ResolveRawColName = CStr(m_colDisplayToRaw(dispName))
+End Function
+
+Private Sub m_cmbSheet_Change()
+    If m_suppressEvents Then Exit Sub
+    m_suppressEvents = True
+    LoadTablesForSelectedSheet
+    If m_cmbTable.ListCount > 0 Then m_cmbTable.ListIndex = 0
+    LoadColumns
+    BuildFieldRows
+    m_suppressEvents = False
+End Sub
 
 Private Sub m_cmbTable_Change()
     If m_suppressEvents Then Exit Sub
+    m_suppressEvents = True
     LoadColumns
+    BuildFieldRows
+    m_suppressEvents = False
 End Sub
 
 Private Sub m_cmdBrowseMail_Click()
@@ -288,7 +528,7 @@ End Sub
 
 Private Function BrowseFolder(title As String) As String
     With Application.FileDialog(msoFileDialogFolderPicker)
-        .title = title
+        .Title = title
         If .Show = -1 Then BrowseFolder = .SelectedItems(1)
     End With
 End Function
@@ -297,53 +537,87 @@ Private Sub m_cmdSave_Click()
     Dim eh As New ErrorHandler: eh.Enter "frmSettings", "cmdSave_Click"
     On Error GoTo ErrHandler
 
-    ' Validate required fields
-    If m_cmbTable.ListIndex >= 0 Then
-        If m_cmbKeyCol.ListIndex <= 0 Or m_cmbNameCol.ListIndex <= 0 Then
-            MsgBox "Key column and Name column are required.", vbExclamation, "Settings"
-            Exit Sub
-        End If
+    If m_cmbTable.ListIndex < 0 Then
+        MsgBox "Table selection is required.", vbExclamation, "Settings"
+        Exit Sub
     End If
 
+    ' Collect roles from field grid and validate
+    Dim roleMap As Object: Set roleMap = CreateObject("Scripting.Dictionary")
+    Dim fld As Variant
+    For Each fld In m_fieldRows.Keys
+        Dim rr As Object: Set rr = m_fieldRows(fld)
+        Dim roleName As String: roleName = Trim$(CStr(rr("role").Text))
+        If Len(roleName) > 0 Then
+            If roleMap.Exists(roleName) Then
+                MsgBox "Role """ & roleName & """ is assigned to multiple columns." & vbCrLf & _
+                       "Each role can only be assigned to one column.", vbExclamation, "Settings"
+                Exit Sub
+            End If
+            roleMap(roleName) = CStr(fld)
+        End If
+    Next fld
+
+    ' Validate required roles
+    Dim missing As String
+    If Not roleMap.Exists("case_id") Then missing = missing & "  - Case ID" & vbCrLf
+    If Not roleMap.Exists("title") Then missing = missing & "  - Title" & vbCrLf
+    If Len(missing) > 0 Then
+        MsgBox "Required roles are not assigned:" & vbCrLf & vbCrLf & missing & vbCrLf & _
+               "Please assign these roles in the Role column.", vbExclamation, "Settings"
+        Exit Sub
+    End If
+
+    ' Warn about recommended roles
+    Dim warn As String
+    If Not roleMap.Exists("status") Then warn = warn & "  - Status" & vbCrLf
+    If Not roleMap.Exists("file_key") Then warn = warn & "  - File Key" & vbCrLf
+    If Not roleMap.Exists("updated_at") Then warn = warn & "  - Updated Date" & vbCrLf
+    If Len(warn) > 0 Then
+        Dim ans As VbMsgBoxResult
+        ans = MsgBox("The following recommended roles are not assigned:" & vbCrLf & vbCrLf & _
+                      warn & vbCrLf & "Continue saving?", vbQuestion + vbYesNo, "Settings")
+        If ans = vbNo Then Exit Sub
+    End If
+
+    Dim src As String: src = m_cmbTable.Text
+    CaseDeskLib.EnsureSource src
     CaseDeskLib.SetStr "mail_folder", m_txtMailFolder.Text
     CaseDeskLib.SetStr "case_folder_root", m_txtCaseFolder.Text
+    CaseDeskLib.SetSourceStr src, "source_sheet", m_cmbSheet.Text
+    CaseDeskLib.SetSourceStr src, "mail_match_mode", m_cmbMailMatchMode.Text
 
-    If m_cmbTable.ListIndex >= 0 Then
-        Dim src As String: src = m_cmbTable.Text
-        CaseDeskLib.EnsureSource src
-        CaseDeskLib.SetSourceStr src, "key_column", ResolveRawColName(m_cmbKeyCol.Text)
-        CaseDeskLib.SetSourceStr src, "display_name_column", ResolveRawColName(m_cmbNameCol.Text)
-        If m_cmbMailCol.ListIndex > 0 Then
-            CaseDeskLib.SetSourceStr src, "mail_link_column", ResolveRawColName(m_cmbMailCol.Text)
-        Else
-            CaseDeskLib.SetSourceStr src, "mail_link_column", ""
-        End If
-        CaseDeskLib.SetSourceStr src, "mail_match_mode", m_cmbMailMatchMode.Text
-        If m_cmbFolderCol.ListIndex > 0 Then
-            CaseDeskLib.SetSourceStr src, "folder_link_column", ResolveRawColName(m_cmbFolderCol.Text)
-        Else
-            CaseDeskLib.SetSourceStr src, "folder_link_column", ""
-        End If
+    ' Save field settings from grid (including roles)
+    For Each fld In m_fieldRows.Keys
+        Dim row As Object: Set row = m_fieldRows(fld)
+        Dim fieldType As String: fieldType = CStr(row("type").Text)
+        Dim fieldRole As String: fieldRole = Trim$(CStr(row("role").Text))
+        CaseDeskLib.SetFieldStr src, CStr(fld), "display_name", Trim$(CStr(row("display").Text))
+        CaseDeskLib.SetFieldBool src, CStr(fld), "visible", CBool(row("visible").Value)
+        CaseDeskLib.SetFieldBool src, CStr(fld), "in_list", CBool(row("visible").Value)
+        CaseDeskLib.SetFieldBool src, CStr(fld), "editable", CBool(row("editable").Value)
+        CaseDeskLib.SetFieldStr src, CStr(fld), "type", fieldType
+        CaseDeskLib.SetFieldBool src, CStr(fld), "multiline", (fieldType = "multiline")
+        CaseDeskLib.SetFieldStr src, CStr(fld), "sort_order", CStr(row("order"))
+        CaseDeskLib.SetFieldStr src, CStr(fld), "role", fieldRole
+    Next fld
 
-        ' Auto-detect field settings from table format
-        Dim wb As Workbook: Set wb = CaseDeskMain.g_dataWb
-        If Not wb Is Nothing Then
-            Dim tbl As ListObject: Set tbl = CaseDeskData.FindTable(wb, src)
-            If Not tbl Is Nothing Then CaseDeskLib.InitFieldSettingsFromTable src, tbl
-        End If
-    End If
+    ' Update source columns from role assignments
+    If roleMap.Exists("case_id") Then CaseDeskLib.SetSourceStr src, "key_column", CStr(roleMap("case_id"))
+    If roleMap.Exists("title") Then CaseDeskLib.SetSourceStr src, "display_name_column", CStr(roleMap("title"))
+    If roleMap.Exists("mail_link") Then CaseDeskLib.SetSourceStr src, "mail_link_column", CStr(roleMap("mail_link"))
+    If roleMap.Exists("file_key") Then CaseDeskLib.SetSourceStr src, "folder_link_column", CStr(roleMap("file_key"))
 
     Unload Me
     eh.OK: Exit Sub
-ErrHandler: eh.Catch
+ErrHandler:
+    eh.Catch
 End Sub
 
-Private Function ResolveRawColName(dispName As String) As String
-    ' Convert display name back to raw column name using mapping
-    ResolveRawColName = dispName
-    If m_colDisplayToRaw Is Nothing Then Exit Function
-    If m_colDisplayToRaw.Exists(dispName) Then ResolveRawColName = CStr(m_colDisplayToRaw(dispName))
-End Function
+Private Sub ApplyRole(src As String, fld As String, roleName As String)
+    If Len(fld) = 0 Then Exit Sub
+    CaseDeskLib.SetFieldStr src, fld, "role", roleName
+End Sub
 
 Private Sub m_cmdCancel_Click()
     Unload Me

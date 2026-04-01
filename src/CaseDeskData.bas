@@ -94,6 +94,26 @@ Public Function GetTableColumnNames(tbl As ListObject) As Collection
 ErrHandler: eh.Catch
 End Function
 
+Public Function GetUsedRangeColumnNames(ws As Worksheet) As Collection
+    Dim eh As New ErrorHandler: eh.Enter "CaseDeskData", "GetUsedRangeColumnNames"
+    On Error GoTo ErrHandler
+    Set GetUsedRangeColumnNames = New Collection
+    If ws.UsedRange Is Nothing Then eh.OK: Exit Function
+    Dim ur As Range: Set ur = ws.UsedRange
+    Dim headerRow As Long: headerRow = ur.Row
+    Dim startCol As Long: startCol = ur.Column
+    Dim nCols As Long: nCols = ur.Columns.Count
+    Dim c As Long
+    For c = 0 To nCols - 1
+        Dim v As Variant: v = ws.Cells(headerRow, startCol + c).Value
+        If Not IsEmpty(v) And Len(CStr(v)) > 0 Then
+            GetUsedRangeColumnNames.Add CStr(v)
+        End If
+    Next c
+    eh.OK: Exit Function
+ErrHandler: eh.Catch
+End Function
+
 ' ============================================================================
 ' FE: Mail/Case counts — read from FE-side Dictionary cache
 ' ============================================================================
