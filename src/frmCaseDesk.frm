@@ -1021,10 +1021,10 @@ Public Sub CommitPendingEdits()
 End Sub
 
 Private Sub UpdateDetail()
-    CommitPendingEdits
     Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "UpdateDetail"
     On Error GoTo ErrHandler
     If m_currentSource = "" Then Exit Sub
+    CommitPendingEdits
     Dim idx As Long: idx = m_lstRecords.ListIndex
     If idx < 0 Or idx >= m_filteredRows.Count Then
         m_currentRecIdx = -1
@@ -1405,13 +1405,16 @@ End Sub
 ' ============================================================================
 
 Public Sub OnCaseDeskSheetChange(sheetName As String)
-    On Error Resume Next
+    On Error GoTo SheetChangeExit
     Select Case sheetName
         Case "_casedesk_signal"
             ' Version from local sheet
-            Dim sigSh As Worksheet: Set sigSh = ThisWorkbook.Worksheets("_casedesk_signal")
+            Dim sigSh As Worksheet
+            On Error Resume Next
+            Set sigSh = ThisWorkbook.Worksheets("_casedesk_signal")
             Dim ver As Long: ver = 0
-            On Error Resume Next: ver = CLng(sigSh.Range("B1").Value)
+            ver = CLng(sigSh.Range("B1").Value)
+            On Error GoTo SheetChangeExit
             If ver > 0 And ver <> m_workerLastVersion Then
                 m_workerLastVersion = ver
                 LoadDataFromLocalSheets
@@ -1424,7 +1427,7 @@ Public Sub OnCaseDeskSheetChange(sheetName As String)
         Case "_casedesk_files"
             ' Now handled synchronously in UpdateFilesTab; ignore async SheetChange
     End Select
-    On Error GoTo 0
+SheetChangeExit:
 End Sub
 
 Private Sub LoadDataFromLocalSheets()
@@ -1718,6 +1721,18 @@ Private Sub CleanupRefs()
     If Not m_watcher Is Nothing Then m_watcher.StopWatching
     Set m_watcher = Nothing
     CaseDeskMain.StopWorker
+
+    ' Clean up auto-created ListObjects
+    If Not CaseDeskMain.g_dataWb Is Nothing Then
+        Dim wsClean As Worksheet
+        For Each wsClean In CaseDeskMain.g_dataWb.Worksheets
+            Dim lo As ListObject
+            For Each lo In wsClean.ListObjects
+                If Left$(lo.Name, 9) = "CaseDesk_" Then lo.Unlist
+            Next lo
+        Next wsClean
+    End If
+
     Set m_currentTable = Nothing
     Set m_filteredRows = Nothing
     Set m_fieldEditors = Nothing

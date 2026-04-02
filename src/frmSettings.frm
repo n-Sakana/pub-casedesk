@@ -344,7 +344,7 @@ NextCol:
 End Sub
 
 Private Sub BuildFieldRows()
-    On Error Resume Next
+    On Error GoTo FieldRowsExit
     ClearFieldRows
     If Len(m_cmbTable.Text) = 0 Then Exit Sub
 
@@ -451,6 +451,7 @@ NextField:
 
     ' Sync separate role ComboBoxes from field grid roles
     SyncRoleComboBoxes
+FieldRowsExit:
     On Error GoTo 0
 End Sub
 
@@ -680,5 +681,6 @@ ErrHandler:
 End Sub
 
 Private Sub m_cmdCancel_Click()
+    CaseDeskLib.LoadFromSheets
     Unload Me
 End Sub

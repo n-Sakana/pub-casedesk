@@ -58,6 +58,16 @@ Public Function ReadTableRecords(tbl As ListObject) As Object
     Set ReadTableRecords = CaseDeskLib.NewDict()
     If tbl.DataBodyRange Is Nothing Then eh.OK: Exit Function
     Dim data As Variant: data = tbl.DataBodyRange.Value
+    ' Handle single-row table (Value returns scalar or 1D array)
+    If Not IsArray(data) Then
+        Dim tmp As Variant
+        ReDim tmp(1 To 1, 1 To tbl.ListColumns.Count)
+        Dim c2 As Long
+        For c2 = 1 To tbl.ListColumns.Count
+            tmp(1, c2) = tbl.DataBodyRange.Cells(1, c2).Value
+        Next c2
+        data = tmp
+    End If
     Dim nCols As Long: nCols = tbl.ListColumns.Count
     Dim colNames() As String: ReDim colNames(1 To nCols)
     Dim c As Long
@@ -258,11 +268,11 @@ Private Sub LoadMailIndexFromLocalSheet(wb As Workbook)
     Dim newIdx As Object: Set newIdx = CaseDeskLib.NewDict()
     Dim i As Long
     For i = 1 To UBound(data, 1)
-        Dim key As String: key = CStr(data(i, 1))
+        Dim key As String: key = SafeStr(data(i, 1))
         If Len(key) = 0 Then GoTo NextLIdx
         If Not newIdx.Exists(key) Then newIdx.Add key, CaseDeskLib.NewDict()
         Dim inner As Object: Set inner = newIdx(key)
-        inner(CStr(data(i, 2))) = True
+        inner(SafeStr(data(i, 2))) = True
 NextLIdx:
     Next i
     Set m_feMailIndex = newIdx
@@ -279,7 +289,7 @@ Private Sub LoadCasesFromLocalSheet(wb As Workbook)
     Dim newNames As Object: Set newNames = CaseDeskLib.NewDict()
     Dim i As Long
     For i = 1 To UBound(data, 1)
-        Dim nm As String: nm = CStr(data(i, 1))
+        Dim nm As String: nm = SafeStr(data(i, 1))
         If Len(nm) > 0 Then newNames(nm) = True
     Next i
     Set m_feCaseNames = newNames
@@ -298,19 +308,19 @@ Private Sub LoadCaseFilesFromLocalSheet(wb As Workbook)
     Dim newFiles As Object: Set newFiles = CaseDeskLib.NewDict()
     Dim i As Long
     For i = 1 To UBound(data, 1)
-        Dim cid As String: cid = CStr(data(i, 1))
+        Dim cid As String: cid = SafeStr(data(i, 1))
         If Len(cid) = 0 Then GoTo NextFile
         If Not newFiles.Exists(cid) Then newFiles.Add cid, CaseDeskLib.NewDict()
         Dim inner As Object: Set inner = newFiles(cid)
         Dim rec As Object: Set rec = CaseDeskLib.NewDict()
         rec.Add "case_id", cid
-        rec.Add "file_name", CStr(data(i, 2))
-        rec.Add "file_path", CStr(data(i, 3))
-        rec.Add "folder_path", CStr(data(i, 4))
-        rec.Add "relative_path", CStr(data(i, 5))
-        rec.Add "file_size", CStr(data(i, 6))
-        rec.Add "modified_at", CStr(data(i, 7))
-        Set inner(CStr(data(i, 3))) = rec
+        rec.Add "file_name", SafeStr(data(i, 2))
+        rec.Add "file_path", SafeStr(data(i, 3))
+        rec.Add "folder_path", SafeStr(data(i, 4))
+        rec.Add "relative_path", SafeStr(data(i, 5))
+        rec.Add "file_size", SafeStr(data(i, 6))
+        rec.Add "modified_at", SafeStr(data(i, 7))
+        Set inner(SafeStr(data(i, 3))) = rec
 NextFile:
     Next i
     Set m_feCaseFiles = newFiles

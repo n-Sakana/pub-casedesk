@@ -472,7 +472,7 @@ Public Sub SaveToSheets()
     On Error GoTo 0
 End Sub
 
-Private Sub LoadFromSheets()
+Public Sub LoadFromSheets()
     On Error Resume Next
     Set m_cfg = CreateObject("Scripting.Dictionary")
     Set m_sources = CreateObject("Scripting.Dictionary")
@@ -661,6 +661,7 @@ Public Sub SetFieldBool(src As String, fld As String, col As String, value As Bo
 End Sub
 
 Public Sub EnsureField(src As String, fld As String)
+    If Not m_loaded Then EnsureConfigSheets
     Dim fk As String: fk = LCase$(src) & "|" & LCase$(fld)
     If Not m_fields.Exists(fk) Then
         SetFieldStr src, fld, "display_name", StripFieldPrefix(fld)
@@ -721,8 +722,8 @@ Public Sub InitFieldSettingsFromTable(src As String, tbl As ListObject)
                 SetFieldStr src, col.Name, "sort_order", CStr(ordinal)
             End If
         End If
-        On Error GoTo 0
 NextCol:
+        On Error GoTo 0
     Next col
 
     ' Remove field entries for columns that no longer exist in the table
