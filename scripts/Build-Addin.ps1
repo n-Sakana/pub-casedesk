@@ -37,6 +37,23 @@ function Get-ModuleFiles {
     return @($items)
 }
 
+# Extract code from .cls/.frm (skip VERSION/BEGIN/END/Attribute header)
+function Extract-VBACode {
+    param([string]$Path)
+
+    $lines = Get-Content -Path $Path -Encoding UTF8
+    $codeLines = @()
+    $inHeader = $true
+    foreach ($line in $lines) {
+        if ($inHeader) {
+            if ($line -match '^Attribute VB_Exposed') { $inHeader = $false; continue }
+            continue
+        }
+        $codeLines += $line
+    }
+    return ($codeLines -join "`r`n")
+}
+
 function Set-CodeModuleText {
     param(
         [object]$CodeModule,
@@ -91,8 +108,25 @@ try {
         throw 'Enable Trust access to the VBA project object model in Excel.'
     }
 
+    # Import .bas directly; .frm/.cls need Add + AddFromString (no .frx files)
     foreach ($file in $moduleFiles) {
-        $vbProj.VBComponents.Import($file.FullName) | Out-Null
+        switch ($file.Extension.ToLower()) {
+            '.bas' {
+                $vbProj.VBComponents.Import($file.FullName) | Out-Null
+            }
+            '.frm' {
+                $code = Extract-VBACode $file.FullName
+                $comp = $vbProj.VBComponents.Add(3) # vbext_ct_MSForm
+                $comp.Name = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+                Set-CodeModuleText -CodeModule $comp.CodeModule -Code $code
+            }
+            '.cls' {
+                $code = Extract-VBACode $file.FullName
+                $comp = $vbProj.VBComponents.Add(2) # vbext_ct_ClassModule
+                $comp.Name = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+                Set-CodeModuleText -CodeModule $comp.CodeModule -Code $code
+            }
+        }
     }
 
     # --- ThisWorkbook code (differs by format) ---
