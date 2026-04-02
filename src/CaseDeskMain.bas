@@ -8,13 +8,6 @@ Public g_workerWb As Object
 Public g_appHandler As AppEventHandler
 Public g_dataWb As Workbook  ' Target workbook (captured at launch)
 
-' Deferred worker startup state
-Private m_workerMailFolder As String
-Private m_workerCaseRoot As String
-Private m_workerMatchField As String
-Private m_workerMatchMode As String
-Private m_workerBeforePids As Object
-
 ' --- Addin Lifecycle ---
 
 Public Sub InitAddin()
@@ -159,98 +152,86 @@ Public Sub StartWorker(mailFolder As String, caseRoot As String, _
     If Not g_workerApp Is Nothing Then Exit Sub
     If Len(mailFolder) = 0 And Len(caseRoot) = 0 Then Exit Sub
 
-    ' Save params for deferred steps
-    m_workerMailFolder = mailFolder
-    m_workerCaseRoot = caseRoot
-    m_workerMatchField = matchField
-    m_workerMatchMode = matchMode
-
     CleanupZombieWorker
 
     Dim cachePath As String: cachePath = GetCacheRoot()
     CaseDeskLib.EnsureFolder cachePath
-    DebugLog cachePath, "StartWorker: scheduling deferred launch"
 
-    ' Step 1: yield to UI, then create Excel.Application
-    Application.OnTime Now, "CaseDeskMain.StartWorker_CreateApp"
-End Sub
-
-' Step 1: Create background Excel.Application
-Public Sub StartWorker_CreateApp()
-    On Error GoTo ErrHandler
-    Dim cachePath As String: cachePath = GetCacheRoot()
-
-    Set m_workerBeforePids = GetExcelPids()
-    Set g_workerApp = CreateObject("Excel.Application")
-    g_workerApp.Visible = False
-    g_workerApp.DisplayAlerts = False
-    DebugLog cachePath, "Excel.Application created"
-
-    ' Step 2: yield to UI, then open worker book
-    Application.OnTime Now, "CaseDeskMain.StartWorker_OpenBook"
-    Exit Sub
-ErrHandler:
-    On Error Resume Next
-    If Not g_workerApp Is Nothing Then g_workerApp.Quit
-    Set g_workerApp = Nothing
-    On Error GoTo 0
-End Sub
-
-' Step 2: Save temp xlsm and open in worker
-Public Sub StartWorker_OpenBook()
-    On Error GoTo ErrHandler
-    Dim cachePath As String: cachePath = GetCacheRoot()
-
-    Dim prevSec As Long: prevSec = g_workerApp.AutomationSecurity
-    g_workerApp.AutomationSecurity = 1
+    ' Save worker xlsm (FE must do this — it owns ThisWorkbook)
     Dim workerBookPath As String: workerBookPath = GetWorkerBookPath()
-    DebugLog cachePath, "Opening: " & workerBookPath
-    g_workerApp.Workbooks.Open workerBookPath, ReadOnly:=True, UpdateLinks:=0
-    g_workerApp.AutomationSecurity = prevSec
-    Set g_workerWb = g_workerApp.Workbooks(g_workerApp.Workbooks.Count)
-    DebugLog cachePath, "Workbook opened"
 
-    ' Step 3: yield to UI, then run entry point
-    Application.OnTime Now, "CaseDeskMain.StartWorker_Run"
-    Exit Sub
-ErrHandler:
-    On Error Resume Next
-    If Not g_workerApp Is Nothing Then g_workerApp.Quit
-    Set g_workerApp = Nothing
-    On Error GoTo 0
+    ' Snapshot current EXCEL PIDs before launching BE
+    Dim beforePids As Object: Set beforePids = GetExcelPids()
+    Dim pidCsv As String: pidCsv = ""
+    Dim k As Variant
+    For Each k In beforePids.keys
+        If Len(pidCsv) > 0 Then pidCsv = pidCsv & ","
+        pidCsv = pidCsv & CStr(k)
+    Next k
+
+    ' Generate launcher VBS — runs entirely in a separate process
+    Dim vbsPath As String: vbsPath = cachePath & "\_launch.vbs"
+    Dim pidPath As String: pidPath = cachePath & "\_worker.pid"
+    Dim feBookPath As String: feBookPath = ThisWorkbook.FullName
+    Dim f As Long: f = FreeFile
+    Open vbsPath For Output As #f
+    Print #f, "On Error Resume Next"
+    Print #f, "Dim xl"
+    Print #f, "Set xl = CreateObject(""Excel.Application"")"
+    Print #f, "xl.Visible = False"
+    Print #f, "xl.DisplayAlerts = False"
+    Print #f, ""
+    Print #f, "' Find BE PID (diff against FE snapshot)"
+    Print #f, "Dim before, wmi, procs, p, pid"
+    Print #f, "before = ""," & pidCsv & ","""
+    Print #f, "pid = 0"
+    Print #f, "Set wmi = GetObject(""winmgmts:\\.\root\cimv2"")"
+    Print #f, "Set procs = wmi.ExecQuery(""SELECT ProcessId FROM Win32_Process WHERE Name = 'EXCEL.EXE'"")"
+    Print #f, "For Each p In procs"
+    Print #f, "  If InStr(before, "","" & CStr(p.ProcessId) & "","") = 0 Then"
+    Print #f, "    pid = p.ProcessId"
+    Print #f, "    Exit For"
+    Print #f, "  End If"
+    Print #f, "Next"
+    Print #f, "Dim fso: Set fso = CreateObject(""Scripting.FileSystemObject"")"
+    Print #f, "If pid > 0 Then"
+    Print #f, "  Dim pf: Set pf = fso.CreateTextFile(""" & Q(pidPath) & """, True)"
+    Print #f, "  pf.WriteLine CStr(pid)"
+    Print #f, "  pf.Close"
+    Print #f, "End If"
+    Print #f, ""
+    Print #f, "' Open worker book and start scan"
+    Print #f, "xl.AutomationSecurity = 1"
+    Print #f, "Dim wb: Set wb = xl.Workbooks.Open(""" & Q(workerBookPath) & """, 0, True)"
+    Print #f, "xl.AutomationSecurity = 3"
+    Print #f, "Dim feWb: Set feWb = GetObject(""" & Q(feBookPath) & """)"
+    Print #f, "xl.Run ""CaseDeskWorker.WorkerEntryPoint"", " & _
+              """" & Q(mailFolder) & """, " & _
+              """" & Q(caseRoot) & """, " & _
+              """" & Q(matchField) & """, " & _
+              """" & Q(matchMode) & """, " & _
+              "feWb, " & _
+              """" & Q(cachePath) & """"
+    Close #f
+
+    DebugLog cachePath, "Launching worker via VBS"
+    Shell "wscript.exe """ & vbsPath & """", vbHide
 End Sub
 
-' Step 3: Run WorkerEntryPoint and record PID
-Public Sub StartWorker_Run()
-    On Error GoTo ErrHandler
-    Dim cachePath As String: cachePath = GetCacheRoot()
-    DebugLog cachePath, "Calling WorkerEntryPoint..."
-
-    g_workerApp.Run "CaseDeskWorker.WorkerEntryPoint", _
-        m_workerMailFolder, m_workerCaseRoot, _
-        m_workerMatchField, m_workerMatchMode, _
-        ThisWorkbook, cachePath
-    DebugLog cachePath, "Run returned OK"
-
-    WriteWorkerPid m_workerBeforePids
-    Set m_workerBeforePids = Nothing
-    Exit Sub
-ErrHandler:
-    On Error Resume Next
-    If Not g_workerApp Is Nothing Then g_workerApp.Quit
-    Set g_workerApp = Nothing
-    Set m_workerBeforePids = Nothing
-    On Error GoTo 0
-End Sub
+Private Function Q(s As String) As String
+    Q = Replace(s, """", """""")
+End Function
 
 Public Sub StopWorker()
-    If g_workerApp Is Nothing Then Exit Sub
     On Error Resume Next
-    Set g_workerWb = Nothing
-    g_workerApp.Quit
-    Set g_workerApp = Nothing
-    Dim pidPath As String: pidPath = GetWorkerPidPath()
-    If Len(Dir$(pidPath)) > 0 Then Kill pidPath
+    ' Try COM shutdown if we still have a reference
+    If Not g_workerApp Is Nothing Then
+        g_workerApp.Quit
+        Set g_workerApp = Nothing
+        Set g_workerWb = Nothing
+    End If
+    ' Always attempt PID-based cleanup (covers VBS-launched workers)
+    CleanupZombieWorker
     On Error GoTo 0
 End Sub
 
@@ -260,24 +241,6 @@ Private Function GetWorkerPidPath() As String
     GetWorkerPidPath = GetCacheRoot() & "\_worker.pid"
 End Function
 
-Private Sub WriteWorkerPid(beforePids As Object)
-    On Error Resume Next
-    If g_workerApp Is Nothing Then Exit Sub
-    Dim afterPids As Object: Set afterPids = GetExcelPids()
-    Dim pid As Long: pid = 0
-    Dim k As Variant
-    For Each k In afterPids.keys
-        If Not beforePids.Exists(k) Then pid = CLng(k): Exit For
-    Next k
-    If pid = 0 Then Exit Sub
-    CaseDeskLib.EnsureFolder GetCacheRoot()
-    Dim pidPath As String: pidPath = GetWorkerPidPath()
-    Dim f As Long: f = FreeFile
-    Open pidPath For Output As #f
-    Print #f, CStr(pid)
-    Close #f
-    On Error GoTo 0
-End Sub
 
 Private Function GetExcelPids() As Object
     Dim d As Object: Set d = CreateObject("Scripting.Dictionary")
