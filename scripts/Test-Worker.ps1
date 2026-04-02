@@ -28,9 +28,13 @@ $excel.Visible = $true; $excel.DisplayAlerts = $false
 try {
     # Open data source first, then addin
     $excel.Workbooks.Open($sampleXlsx) | Out-Null
+    $sampleWb = $excel.Workbooks.Item(1)
     $prev = $excel.AutomationSecurity; $excel.AutomationSecurity = 1
     $wb = $excel.Workbooks.Open($xlsm)
     $excel.AutomationSecurity = $prev
+
+    # Activate sample workbook so ShowPanel captures it as g_dataWb
+    $sampleWb.Activate()
 
     $t0 = Get-Date
     $excel.Run("'casedesk.xlsm'!CaseDeskMain.CaseDesk_ShowPanel")
