@@ -8,6 +8,13 @@ Public g_workerWb As Object
 Public g_appHandler As AppEventHandler
 Public g_dataWb As Workbook  ' Target workbook (captured at launch)
 
+' Deferred worker startup state
+Private m_workerMailFolder As String
+Private m_workerCaseRoot As String
+Private m_workerMatchField As String
+Private m_workerMatchMode As String
+Private m_workerBeforePids As Object
+
 ' --- Addin Lifecycle ---
 
 Public Sub InitAddin()
@@ -149,23 +156,50 @@ End Sub
 
 Public Sub StartWorker(mailFolder As String, caseRoot As String, _
                        matchField As String, matchMode As String)
-    Dim eh As New ErrorHandler: eh.Enter "CaseDeskMain", "StartWorker"
-    On Error GoTo ErrHandler
+    If Not g_workerApp Is Nothing Then Exit Sub
+    If Len(mailFolder) = 0 And Len(caseRoot) = 0 Then Exit Sub
 
-    If Not g_workerApp Is Nothing Then eh.OK: Exit Sub
-    If Len(mailFolder) = 0 And Len(caseRoot) = 0 Then eh.OK: Exit Sub
+    ' Save params for deferred steps
+    m_workerMailFolder = mailFolder
+    m_workerCaseRoot = caseRoot
+    m_workerMatchField = matchField
+    m_workerMatchMode = matchMode
 
     CleanupZombieWorker
 
     Dim cachePath As String: cachePath = GetCacheRoot()
     CaseDeskLib.EnsureFolder cachePath
-    DebugLog cachePath, "StartWorker begin: mail=" & mailFolder & " cases=" & caseRoot
+    DebugLog cachePath, "StartWorker: scheduling deferred launch"
 
-    Dim beforePids As Object: Set beforePids = GetExcelPids()
+    ' Step 1: yield to UI, then create Excel.Application
+    Application.OnTime Now, "CaseDeskMain.StartWorker_CreateApp"
+End Sub
+
+' Step 1: Create background Excel.Application
+Public Sub StartWorker_CreateApp()
+    On Error GoTo ErrHandler
+    Dim cachePath As String: cachePath = GetCacheRoot()
+
+    Set m_workerBeforePids = GetExcelPids()
     Set g_workerApp = CreateObject("Excel.Application")
     g_workerApp.Visible = False
     g_workerApp.DisplayAlerts = False
     DebugLog cachePath, "Excel.Application created"
+
+    ' Step 2: yield to UI, then open worker book
+    Application.OnTime Now, "CaseDeskMain.StartWorker_OpenBook"
+    Exit Sub
+ErrHandler:
+    On Error Resume Next
+    If Not g_workerApp Is Nothing Then g_workerApp.Quit
+    Set g_workerApp = Nothing
+    On Error GoTo 0
+End Sub
+
+' Step 2: Save temp xlsm and open in worker
+Public Sub StartWorker_OpenBook()
+    On Error GoTo ErrHandler
+    Dim cachePath As String: cachePath = GetCacheRoot()
 
     Dim prevSec As Long: prevSec = g_workerApp.AutomationSecurity
     g_workerApp.AutomationSecurity = 1
@@ -174,19 +208,38 @@ Public Sub StartWorker(mailFolder As String, caseRoot As String, _
     g_workerApp.Workbooks.Open workerBookPath, ReadOnly:=True, UpdateLinks:=0
     g_workerApp.AutomationSecurity = prevSec
     Set g_workerWb = g_workerApp.Workbooks(g_workerApp.Workbooks.Count)
-    DebugLog cachePath, "Workbook opened, calling Run..."
+    DebugLog cachePath, "Workbook opened"
 
-    g_workerApp.Run "CaseDeskWorker.WorkerEntryPoint", mailFolder, caseRoot, matchField, matchMode, ThisWorkbook, cachePath
-    DebugLog cachePath, "Run returned OK"
-
-    WriteWorkerPid beforePids
-
-    eh.OK: Exit Sub
+    ' Step 3: yield to UI, then run entry point
+    Application.OnTime Now, "CaseDeskMain.StartWorker_Run"
+    Exit Sub
 ErrHandler:
-    eh.Catch
     On Error Resume Next
     If Not g_workerApp Is Nothing Then g_workerApp.Quit
     Set g_workerApp = Nothing
+    On Error GoTo 0
+End Sub
+
+' Step 3: Run WorkerEntryPoint and record PID
+Public Sub StartWorker_Run()
+    On Error GoTo ErrHandler
+    Dim cachePath As String: cachePath = GetCacheRoot()
+    DebugLog cachePath, "Calling WorkerEntryPoint..."
+
+    g_workerApp.Run "CaseDeskWorker.WorkerEntryPoint", _
+        m_workerMailFolder, m_workerCaseRoot, _
+        m_workerMatchField, m_workerMatchMode, _
+        ThisWorkbook, cachePath
+    DebugLog cachePath, "Run returned OK"
+
+    WriteWorkerPid m_workerBeforePids
+    Set m_workerBeforePids = Nothing
+    Exit Sub
+ErrHandler:
+    On Error Resume Next
+    If Not g_workerApp Is Nothing Then g_workerApp.Quit
+    Set g_workerApp = Nothing
+    Set m_workerBeforePids = Nothing
     On Error GoTo 0
 End Sub
 

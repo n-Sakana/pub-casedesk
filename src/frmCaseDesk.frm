@@ -1433,12 +1433,9 @@ Public Sub DoPollCycle()
     On Error Resume Next
     If CaseDeskMain.g_workerApp Is Nothing Then
         If Not m_lblStatus Is Nothing Then m_lblStatus.Caption = "  Starting worker..."
-        DoEvents
         CaseDeskMain.StartWorker m_pendingMailFolder, m_pendingCaseRoot, m_pendingMatchField, m_pendingMatchMode
-        If Not m_lblStatus Is Nothing Then m_lblStatus.Caption = "  Scanning..."
     Else
         If Not m_lblStatus Is Nothing Then m_lblStatus.Caption = "  Updating config..."
-        DoEvents
         CaseDeskMain.g_workerApp.Run "CaseDeskWorker.UpdateConfig", _
             m_pendingMailFolder, m_pendingCaseRoot, m_pendingMatchField, m_pendingMatchMode
     End If
