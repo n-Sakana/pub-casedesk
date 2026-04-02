@@ -96,18 +96,8 @@ Private Function GetCacheRoot() As String
 End Function
 
 Private Function GetWorkerBookPath() As String
-    ' Worker cannot open the xlam (locked/IsAddin). Save a temp xlsm copy.
-    Dim cachePath As String: cachePath = GetCacheRoot()
-    CaseDeskLib.EnsureFolder cachePath
-    Dim dest As String: dest = cachePath & "\casedesk_worker.xlsm"
-    On Error Resume Next
-    ' Save a non-addin copy of ThisWorkbook as xlsm format
-    Dim wasAddin As Boolean: wasAddin = ThisWorkbook.IsAddin
-    ThisWorkbook.IsAddin = False
-    ThisWorkbook.SaveCopyAs dest
-    ThisWorkbook.IsAddin = wasAddin
-    On Error GoTo 0
-    GetWorkerBookPath = dest
+    ' Open the xlam itself in the BE process (ReadOnly avoids lock conflict)
+    GetWorkerBookPath = ThisWorkbook.FullName
 End Function
 
 Private Sub DebugLog(cachePath As String, msg As String)
