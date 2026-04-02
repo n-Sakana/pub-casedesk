@@ -309,6 +309,12 @@ Public Sub WriteTextFile(path As String, content As String)
     out.Close: m_writeStm.Close
     Exit Sub
 ErrOut:
+    On Error Resume Next
+    If Not m_writeStm Is Nothing Then
+        m_writeStm.Close
+        Set m_writeStm = Nothing
+    End If
+    On Error GoTo 0
 End Sub
 
 Public Sub EnsureFolder(path As String)
@@ -462,7 +468,7 @@ Public Sub SaveToSheets()
     SaveConfigSheet
     SaveSourcesSheet
     SaveFieldsSheet
-    m_dirty = False
+    If Err.Number = 0 Then m_dirty = False
     On Error GoTo 0
 End Sub
 

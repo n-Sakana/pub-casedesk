@@ -197,6 +197,7 @@ ErrHandler:
     On Error Resume Next
     If Not g_workerApp Is Nothing Then g_workerApp.Quit
     Set g_workerApp = Nothing
+    Set g_workerWb = Nothing
     On Error GoTo 0
 End Sub
 

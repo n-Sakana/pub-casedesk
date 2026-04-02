@@ -596,7 +596,7 @@ Private Sub m_cmdSave_Click()
     Dim eh As New ErrorHandler: eh.Enter "frmSettings", "cmdSave_Click"
     On Error GoTo ErrHandler
 
-    If m_cmbTable.ListIndex < 0 Then
+    If Len(m_cmbTable.Text) = 0 Then
         MsgBox "Table selection is required.", vbExclamation, "Settings"
         Exit Sub
     End If
@@ -667,6 +667,12 @@ Private Sub m_cmdSave_Click()
     If roleMap.Exists("mail_link") Then CaseDeskLib.SetSourceStr src, "mail_link_column", CStr(roleMap("mail_link"))
     If roleMap.Exists("file_key") Then CaseDeskLib.SetSourceStr src, "folder_link_column", CStr(roleMap("file_key"))
 
+    If Not roleMap.Exists("case_id") Then CaseDeskLib.SetSourceStr src, "key_column", ""
+    If Not roleMap.Exists("title") Then CaseDeskLib.SetSourceStr src, "display_name_column", ""
+    If Not roleMap.Exists("mail_link") Then CaseDeskLib.SetSourceStr src, "mail_link_column", ""
+    If Not roleMap.Exists("file_key") Then CaseDeskLib.SetSourceStr src, "folder_link_column", ""
+
+    CaseDeskLib.SaveToSheets
     Unload Me
     eh.OK: Exit Sub
 ErrHandler:

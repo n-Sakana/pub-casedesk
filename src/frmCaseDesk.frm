@@ -1034,7 +1034,7 @@ Private Sub UpdateDetail()
     m_currentRecIdx = CLng(m_filteredRows(idx + 1))
     On Error Resume Next
     m_mpgTabs.Value = 0
-    On Error GoTo 0
+    On Error GoTo ErrHandler
     FillFieldEditors
     UpdateMailTab
     UpdateFilesTab
@@ -1069,7 +1069,7 @@ Private Sub ClearFieldEditors()
     Next i
     m_loading = False
     eh.OK: Exit Sub
-ErrHandler: eh.Catch
+ErrHandler: m_loading = False: eh.Catch
 End Sub
 
 ' ============================================================================
@@ -1082,6 +1082,8 @@ Private Sub UpdateMailTab()
     If m_mailPageIdx < 0 Then Exit Sub
     If m_lstMail Is Nothing Then Exit Sub
     m_lstMail.Clear
+    Set m_matchedMails = Nothing
+    m_matchedMailArr = Empty
     m_lblSubject.Caption = "": m_lblFrom.Caption = "": m_lblDate.Caption = ""
     m_txtMailBody.Text = "": m_lstAttach.Clear
     m_mpgTabs.Pages(m_mailPageIdx).Caption = "Mail (0)"
@@ -1279,9 +1281,11 @@ End Function
 Public Sub OnFieldEdited(fieldName As String, newVal As String)
     If m_loading Then Exit Sub
     If m_currentRecIdx < 1 Then Exit Sub
+    On Error Resume Next
     Application.EnableEvents = False
     CaseDeskData.WriteTableCell m_currentTable, m_currentRecIdx, fieldName, newVal
     Application.EnableEvents = True
+    On Error GoTo 0
 End Sub
 
 Public Sub OnFieldChanged(fieldName As String, oldVal As String, newVal As String, origin As String)

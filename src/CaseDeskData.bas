@@ -11,6 +11,10 @@ Private m_feMailIndex As Object      ' Dict: normalized_key -> Dict(entry_id -> 
 Private m_feCaseNames As Object      ' Dict: folder_name -> True
 Private m_feCaseFiles As Object      ' Dict: case_id -> Dict(file_path -> record Dict)
 
+Private Function SafeStr(v As Variant) As String
+    If IsNull(v) Or IsEmpty(v) Then SafeStr = "" Else SafeStr = CStr(v)
+End Function
+
 ' ============================================================================
 ' Table Operations (FE: reads/writes the source Excel file directly)
 ' ============================================================================
@@ -211,19 +215,19 @@ Private Sub LoadMailFromLocalSheet(wb As Workbook)
     Dim newRecs As Object: Set newRecs = CaseDeskLib.NewDict()
     Dim i As Long
     For i = 1 To UBound(data, 1)
-        Dim eid As String: eid = CStr(data(i, 1))
+        Dim eid As String: eid = SafeStr(data(i, 1))
         If Len(eid) = 0 Then GoTo NextLMail
         Dim rec As Object: Set rec = CaseDeskLib.NewDict()
         rec.Add "entry_id", eid
-        rec.Add "sender_email", CStr(data(i, 2))
-        rec.Add "sender_name", CStr(data(i, 3))
-        rec.Add "subject", CStr(data(i, 4))
-        rec.Add "received_at", CStr(data(i, 5))
-        rec.Add "folder_path", CStr(data(i, 6))
-        rec.Add "body_path", CStr(data(i, 7))
-        rec.Add "msg_path", CStr(data(i, 8))
+        rec.Add "sender_email", SafeStr(data(i, 2))
+        rec.Add "sender_name", SafeStr(data(i, 3))
+        rec.Add "subject", SafeStr(data(i, 4))
+        rec.Add "received_at", SafeStr(data(i, 5))
+        rec.Add "folder_path", SafeStr(data(i, 6))
+        rec.Add "body_path", SafeStr(data(i, 7))
+        rec.Add "msg_path", SafeStr(data(i, 8))
         Dim attDict As Object: Set attDict = CaseDeskLib.NewDict()
-        Dim attStr As String: attStr = CStr(data(i, 9))
+        Dim attStr As String: attStr = SafeStr(data(i, 9))
         If Len(attStr) > 0 Then
             Dim attParts() As String: attParts = Split(attStr, "|")
             Dim a As Long
@@ -235,8 +239,8 @@ Private Sub LoadMailFromLocalSheet(wb As Workbook)
             Next a
         End If
         rec.Add "attachment_paths", attDict
-        rec.Add "_mail_folder", CStr(data(i, 10))
-        If UBound(data, 2) >= 11 Then rec.Add "body_text", CStr(data(i, 11))
+        rec.Add "_mail_folder", SafeStr(data(i, 10))
+        If UBound(data, 2) >= 11 Then rec.Add "body_text", SafeStr(data(i, 11))
         Set newRecs(eid) = rec
 NextLMail:
     Next i
