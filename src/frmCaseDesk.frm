@@ -1060,6 +1060,7 @@ Private Sub UpdateMailTab()
     m_lstMail.Clear
     m_lblSubject.Caption = "": m_lblFrom.Caption = "": m_lblDate.Caption = ""
     m_txtMailBody.Text = "": m_lstAttach.Clear
+    m_mpgTabs.Pages(m_mailPageIdx).Caption = "Mail (0)"
 
     If m_currentRecIdx < 1 Then Exit Sub
     Dim linkCol As String: linkCol = CaseDeskLib.GetSourceStr(m_currentSource, "mail_link_column")
@@ -1102,7 +1103,8 @@ Private Sub UpdateFilesTab()
     m_lstFiles.Clear
     Set m_fileTreeItems = New Collection
 
-    If m_currentRecIdx < 1 Then m_mpgTabs.Pages(m_filesPageIdx).Caption = "Files (0)": Exit Sub
+    m_mpgTabs.Pages(m_filesPageIdx).Caption = "Files (0)"
+    If m_currentRecIdx < 1 Then Exit Sub
     Dim linkCol As String: linkCol = CaseDeskLib.GetSourceStr(m_currentSource, "folder_link_column")
     If Len(linkCol) = 0 Then Exit Sub
 
