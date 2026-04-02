@@ -619,7 +619,31 @@ Private Sub SwitchSource(sourceName As String)
     m_loading = True
 
     m_currentSource = sourceName
-    Set m_currentTable = CaseDeskData.FindTable(GetDataWorkbook(), sourceName)
+    Dim wb As Workbook: Set wb = GetDataWorkbook()
+    Set m_currentTable = CaseDeskData.FindTable(wb, sourceName)
+
+    ' No ListObject found — create one from UsedRange on the source sheet
+    If m_currentTable Is Nothing And Not wb Is Nothing Then
+        Dim sheetName As String: sheetName = CaseDeskLib.GetSourceStr(sourceName, "source_sheet")
+        If Len(sheetName) = 0 Then sheetName = sourceName
+        Dim ws As Worksheet
+        On Error Resume Next
+        Set ws = wb.Worksheets(sheetName)
+        On Error GoTo ErrHandler
+        If Not ws Is Nothing Then
+            If ws.ListObjects.Count > 0 Then
+                Set m_currentTable = ws.ListObjects(1)
+            Else
+                Dim ur As Range: Set ur = ws.UsedRange
+                If Not ur Is Nothing Then
+                    If ur.Rows.Count > 1 And ur.Columns.Count > 1 Then
+                        Set m_currentTable = ws.ListObjects.Add(xlSrcRange, ur, , xlYes)
+                        m_currentTable.Name = "CaseDesk_" & Replace(sheetName, " ", "_")
+                    End If
+                End If
+            End If
+        End If
+    End If
     If m_currentTable Is Nothing Then m_loading = False: Exit Sub
 
     ' Watch table sheet for immediate change detection
