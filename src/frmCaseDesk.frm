@@ -46,6 +46,7 @@ Private m_txtMailBody As MSForms.TextBox
 ' ============================================================================
 Private m_currentSource As String
 Private m_currentTable As ListObject
+Private m_sourceMap As Object          ' Dict: display label -> source_name
 Private m_filteredRows As Collection
 Private m_currentRecIdx As Long
 Private m_fieldEditors As Collection
@@ -123,7 +124,14 @@ Private Sub UserForm_Initialize()
     If Len(selSrc) > 0 Then
         Dim si As Long
         For si = 0 To m_cmbSource.ListCount - 1
-            If m_cmbSource.List(si) = selSrc Then m_cmbSource.ListIndex = si: Exit For
+            Dim lbl As String: lbl = m_cmbSource.List(si)
+            ' Match by display label or by internal source_name
+            If lbl = selSrc Then m_cmbSource.ListIndex = si: Exit For
+            If Not m_sourceMap Is Nothing Then
+                If m_sourceMap.Exists(lbl) Then
+                    If CStr(m_sourceMap(lbl)) = selSrc Then m_cmbSource.ListIndex = si: Exit For
+                End If
+            End If
         Next si
     End If
     m_txtFilter.Text = CaseDeskLib.GetStr("search_text")
@@ -560,31 +568,40 @@ Private Sub LoadSources()
     Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "LoadSources"
     On Error GoTo ErrHandler
     m_cmbSource.Clear
+    Set m_sourceMap = CreateObject("Scripting.Dictionary")
     Dim seen As Object: Set seen = CreateObject("Scripting.Dictionary")
 
-    ' 1. Configured sources (_casedesk_sources) first
+    ' 1. Configured sources (_casedesk_sources) — display sheet name
     Dim cfgNames As Collection: Set cfgNames = CaseDeskLib.GetSourceNames()
     Dim cn As Variant
     For Each cn In cfgNames
-        Dim s As String: s = CStr(cn)
-        If Not seen.Exists(LCase$(s)) Then
-            m_cmbSource.AddItem s
-            seen(LCase$(s)) = True
+        Dim src As String: src = CStr(cn)
+        Dim sheet As String: sheet = CaseDeskLib.GetSourceStr(src, "source_sheet")
+        Dim label As String
+        If Len(sheet) > 0 Then label = sheet Else label = src
+        If Not seen.Exists(LCase$(label)) Then
+            m_cmbSource.AddItem label
+            m_sourceMap(label) = src
+            seen(LCase$(label)) = True
         End If
     Next cn
 
     ' 2. Workbook ListObjects (auto-discovered, may overlap)
     Dim wb As Workbook: Set wb = GetDataWorkbook()
     If Not wb Is Nothing Then
-        Dim tblNames As Collection: Set tblNames = CaseDeskData.GetWorkbookTableNames(wb)
-        Dim tn As Variant
-        For Each tn In tblNames
-            Dim t As String: t = CStr(tn)
-            If Not seen.Exists(LCase$(t)) Then
-                m_cmbSource.AddItem t
-                seen(LCase$(t)) = True
+        Dim ws As Worksheet
+        For Each ws In wb.Worksheets
+            If ws.Visible <> xlSheetVisible Then GoTo NextWs
+            If ws.ListObjects.Count > 0 Then
+                Dim shName As String: shName = ws.Name
+                If Not seen.Exists(LCase$(shName)) Then
+                    m_cmbSource.AddItem shName
+                    m_sourceMap(shName) = ws.ListObjects(1).Name
+                    seen(LCase$(shName)) = True
+                End If
             End If
-        Next tn
+NextWs:
+        Next ws
     End If
 
     If m_cmbSource.ListCount > 0 Then m_cmbSource.ListIndex = 0
@@ -1482,7 +1499,16 @@ End Sub
 Private Sub m_cmbSource_Change()
     Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "cmbSource_Change"
     On Error GoTo ErrHandler
-    If m_cmbSource.ListIndex >= 0 Then SwitchSource m_cmbSource.Text
+    If m_cmbSource.ListIndex >= 0 Then
+        Dim label As String: label = m_cmbSource.Text
+        Dim src As String
+        If Not m_sourceMap Is Nothing Then
+            If m_sourceMap.Exists(label) Then src = CStr(m_sourceMap(label)) Else src = label
+        Else
+            src = label
+        End If
+        SwitchSource src
+    End If
     eh.OK: Exit Sub
 ErrHandler: eh.Catch
 End Sub
