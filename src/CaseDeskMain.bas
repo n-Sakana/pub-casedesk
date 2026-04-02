@@ -96,8 +96,28 @@ Private Function GetCacheRoot() As String
 End Function
 
 Private Function GetWorkerBookPath() As String
-    ' Open the xlam itself in the BE process (ReadOnly avoids lock conflict)
-    GetWorkerBookPath = ThisWorkbook.FullName
+    ' xlsm can be opened directly by BE; xlam needs a temp xlsm copy
+    If LCase$(Right$(ThisWorkbook.Name, 5)) = ".xlsm" Then
+        GetWorkerBookPath = ThisWorkbook.FullName
+        Exit Function
+    End If
+    Dim cachePath As String: cachePath = GetCacheRoot()
+    CaseDeskLib.EnsureFolder cachePath
+    Dim dest As String: dest = cachePath & "\casedesk_worker.xlsm"
+    ' Reuse cached copy if it exists and is newer than the xlam
+    If Len(Dir$(dest)) > 0 Then
+        If FileDateTime(dest) >= FileDateTime(ThisWorkbook.FullName) Then
+            GetWorkerBookPath = dest
+            Exit Function
+        End If
+    End If
+    On Error Resume Next
+    Dim wasAddin As Boolean: wasAddin = ThisWorkbook.IsAddin
+    ThisWorkbook.IsAddin = False
+    ThisWorkbook.SaveCopyAs dest
+    ThisWorkbook.IsAddin = wasAddin
+    On Error GoTo 0
+    GetWorkerBookPath = dest
 End Function
 
 Private Sub DebugLog(cachePath As String, msg As String)
