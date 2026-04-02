@@ -12,6 +12,6 @@
 - FEのデータ読み取りはDictionary引き（O(1)）
 
 ## Build & Test
-- ビルド: `powershell -ExecutionPolicy Bypass -File scripts/Build-Addin.ps1`
+- ビルド: `powershell -ExecutionPolicy Bypass -File scripts/Build-Addin.ps1`（出力先: `dist/`）
 - サンプル実行: `samplerun.bat`（ビルド→xlsm＋casedesk-sample.xlsx を開く）
 - テスト: `powershell -ExecutionPolicy Bypass -File scripts/Test-Worker.ps1`

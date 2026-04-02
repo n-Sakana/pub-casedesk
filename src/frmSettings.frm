@@ -441,7 +441,7 @@ Private Sub BuildFieldRows()
         Set row("type") = cmbType
         Set row("role") = cmbRole
         row("order") = CStr(i)
-        m_fieldRows(fld) = row
+        Set m_fieldRows(fld) = row
 
         y = y + GRID_ROW_H
 NextField:
