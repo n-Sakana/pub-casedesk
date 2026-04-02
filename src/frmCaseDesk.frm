@@ -560,14 +560,33 @@ Private Sub LoadSources()
     Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "LoadSources"
     On Error GoTo ErrHandler
     m_cmbSource.Clear
+    Dim seen As Object: Set seen = CreateObject("Scripting.Dictionary")
+
+    ' 1. Configured sources (_casedesk_sources) first
+    Dim cfgNames As Collection: Set cfgNames = CaseDeskLib.GetSourceNames()
+    Dim cn As Variant
+    For Each cn In cfgNames
+        Dim s As String: s = CStr(cn)
+        If Not seen.Exists(LCase$(s)) Then
+            m_cmbSource.AddItem s
+            seen(LCase$(s)) = True
+        End If
+    Next cn
+
+    ' 2. Workbook ListObjects (auto-discovered, may overlap)
     Dim wb As Workbook: Set wb = GetDataWorkbook()
     If Not wb Is Nothing Then
-        Dim names As Collection: Set names = CaseDeskData.GetWorkbookTableNames(wb)
-        Dim n As Variant
-        For Each n In names
-            m_cmbSource.AddItem CStr(n)
-        Next n
+        Dim tblNames As Collection: Set tblNames = CaseDeskData.GetWorkbookTableNames(wb)
+        Dim tn As Variant
+        For Each tn In tblNames
+            Dim t As String: t = CStr(tn)
+            If Not seen.Exists(LCase$(t)) Then
+                m_cmbSource.AddItem t
+                seen(LCase$(t)) = True
+            End If
+        Next tn
     End If
+
     If m_cmbSource.ListCount > 0 Then m_cmbSource.ListIndex = 0
     eh.OK: Exit Sub
 ErrHandler: eh.Catch
