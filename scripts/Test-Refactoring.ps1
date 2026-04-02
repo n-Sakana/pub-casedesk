@@ -6,7 +6,7 @@ param([int]$TimeoutSeconds = 30)
 
 $ErrorActionPreference = 'Stop'
 $projectDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$casedeskPath = Join-Path $projectDir 'casedesk.xlsm'
+$casedeskPath = Join-Path $projectDir 'dist\casedesk.xlsm'
 $samplePath = Join-Path $projectDir 'sample\casedesk-sample.xlsx'
 
 if (-not (Test-Path $casedeskPath)) { Write-Error "casedesk.xlsm not found. Run Build-Addin.ps1 first."; exit 1 }

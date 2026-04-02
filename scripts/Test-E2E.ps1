@@ -4,7 +4,7 @@
 $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectDir = Split-Path -Parent $scriptDir
-$xlsmPath = Join-Path $projectDir 'casedesk.xlsm'
+$xlsmPath = Join-Path $projectDir 'dist\casedesk.xlsm'
 $sampleDir = Join-Path $projectDir 'sample'
 
 if (-not (Test-Path $xlsmPath)) { Write-Host "ERROR: casedesk.xlsm not found." -ForegroundColor Red; exit 1 }

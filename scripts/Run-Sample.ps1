@@ -3,7 +3,7 @@
 
 $ErrorActionPreference = 'Stop'
 $projectDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$xlamPath = Join-Path $projectDir 'casedesk.xlam'
+$xlamPath = Join-Path $projectDir 'dist\casedesk.xlam'
 $samplePath = Join-Path $projectDir 'sample\casedesk-sample.xlsx'
 
 if (-not (Test-Path $xlamPath)) {

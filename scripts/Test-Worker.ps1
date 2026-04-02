@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $projectDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $mailDir = Join-Path $projectDir 'sample\mail'
 $caseDir = Join-Path $projectDir 'sample\cases'
-$xlsm = Join-Path $projectDir 'casedesk.xlsm'
+$xlsm = Join-Path $projectDir 'dist\casedesk.xlsm'
 $testMail = Join-Path $mailDir 'mail_test_perf'
 $testCase = Join-Path $caseDir 'R06-PERFTEST'
 
