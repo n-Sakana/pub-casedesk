@@ -950,6 +950,118 @@ Private Function GuessMultiline(col As ListColumn) As Boolean
 End Function
 
 ' ============================================================================
+' Settings Export / Import
+' ============================================================================
+
+Public Function ExportSettings(filePath As String) As Boolean
+    If Not m_loaded Then EnsureConfigSheets
+    On Error GoTo ErrOut
+
+    Dim root As Object: Set root = NewDict()
+
+    ' config
+    Set root("config") = m_cfg
+
+    ' sources (clone without lowercase key issue)
+    Dim srcOut As Object: Set srcOut = NewDict()
+    Dim sk As Variant
+    For Each sk In m_sources.keys
+        Dim sd As Object: Set sd = m_sources(sk)
+        Dim sName As String: sName = DictStr(sd, "source_name", CStr(sk))
+        Set srcOut(sName) = sd
+    Next sk
+    Set root("sources") = srcOut
+
+    ' fields grouped by source
+    Dim fldOut As Object: Set fldOut = NewDict()
+    Dim fk As Variant
+    For Each fk In m_fields.keys
+        Dim fd As Object: Set fd = m_fields(fk)
+        Dim fSrc As String: fSrc = DictStr(fd, "source_name")
+        Dim fName As String: fName = DictStr(fd, "field_name")
+        If Len(fSrc) = 0 Or Len(fName) = 0 Then GoTo NextField
+        If Not fldOut.Exists(fSrc) Then Set fldOut(fSrc) = NewDict()
+        Dim srcFields As Object: Set srcFields = fldOut(fSrc)
+        Set srcFields(fName) = fd
+NextField:
+    Next fk
+    Set root("fields") = fldOut
+
+    WriteTextFile filePath, ToJson(root, 0)
+    ExportSettings = True
+    Exit Function
+ErrOut:
+    ExportSettings = False
+End Function
+
+Public Function ImportSettings(filePath As String) As Boolean
+    On Error GoTo ErrOut
+    Dim json As String: json = ReadTextFile(filePath)
+    If Len(json) = 0 Then ImportSettings = False: Exit Function
+
+    Dim root As Object: Set root = ParseJson(json)
+    If root Is Nothing Then ImportSettings = False: Exit Function
+    If Not m_loaded Then EnsureConfigSheets
+
+    ' Import config
+    Dim cfgObj As Object: Set cfgObj = DictObj(root, "config")
+    If Not cfgObj Is Nothing Then
+        Dim ck As Variant
+        For Each ck In cfgObj.keys
+            m_cfg(CStr(ck)) = CStr(cfgObj(ck))
+        Next ck
+    End If
+
+    ' Import sources
+    Dim srcObj As Object: Set srcObj = DictObj(root, "sources")
+    If Not srcObj Is Nothing Then
+        Dim sk2 As Variant
+        For Each sk2 In srcObj.keys
+            Dim srcName As String: srcName = CStr(sk2)
+            Dim importSrc As Object: Set importSrc = srcObj(sk2)
+            If Not m_sources.Exists(srcName) Then Set m_sources(srcName) = NewDict()
+            Dim tgtSrc As Object: Set tgtSrc = m_sources(srcName)
+            Dim sc As Variant
+            For Each sc In importSrc.keys
+                tgtSrc(CStr(sc)) = CStr(importSrc(sc))
+            Next sc
+        Next sk2
+    End If
+
+    ' Import fields
+    Dim fldObj As Object: Set fldObj = DictObj(root, "fields")
+    If Not fldObj Is Nothing Then
+        Dim fs As Variant
+        For Each fs In fldObj.keys
+            Dim srcFlds As Object: Set srcFlds = fldObj(fs)
+            Dim fn As Variant
+            For Each fn In srcFlds.keys
+                Dim fDict As Object: Set fDict = srcFlds(fn)
+                Dim fk2 As String: fk2 = LCase$(CStr(fs)) & "|" & LCase$(CStr(fn))
+                If Not m_fields.Exists(fk2) Then
+                    Dim newFd As Object: Set newFd = NewDict()
+                    newFd("source_name") = CStr(fs)
+                    newFd("field_name") = CStr(fn)
+                    Set m_fields(fk2) = newFd
+                End If
+                Dim tgtFd As Object: Set tgtFd = m_fields(fk2)
+                Dim fc As Variant
+                For Each fc In fDict.keys
+                    tgtFd(CStr(fc)) = CStr(fDict(fc))
+                Next fc
+            Next fn
+        Next fs
+    End If
+
+    m_dirty = True
+    SaveToSheets
+    ImportSettings = True
+    Exit Function
+ErrOut:
+    ImportSettings = False
+End Function
+
+' ============================================================================
 ' Sheet Persistence (private)
 ' ============================================================================
 
