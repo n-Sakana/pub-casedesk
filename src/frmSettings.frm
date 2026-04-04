@@ -17,6 +17,9 @@ Option Explicit
 Private WithEvents m_cmbSheet As MSForms.ComboBox
 Private WithEvents m_cmbTable As MSForms.ComboBox
 Private m_cmbMailMatchMode As MSForms.ComboBox
+Private m_cmbKeyColumn As MSForms.ComboBox
+Private m_cmbFileLink As MSForms.ComboBox
+Private m_cmbMailLink As MSForms.ComboBox
 Private WithEvents m_cmdBrowseMail As MSForms.CommandButton
 Private WithEvents m_cmdBrowseCase As MSForms.CommandButton
 Private WithEvents m_cmdSave As MSForms.CommandButton
@@ -41,8 +44,8 @@ Private Const GRID_ROW_H As Single = 22
 Private Sub UserForm_Initialize()
     Dim eh As New ErrorHandler: eh.Enter "frmSettings", "UserForm_Initialize"
     On Error GoTo ErrHandler
-    Me.Width = 640
-    Me.Height = 520
+    Me.Width = 480
+    Me.Height = 420
     m_suppressEvents = True
     Set m_fieldRows = CreateObject("Scripting.Dictionary")
     BuildLayout
@@ -110,6 +113,18 @@ Private Sub BuildLayout()
     m_cmbMailMatchMode.AddItem "exact"
     m_cmbMailMatchMode.AddItem "domain"
     m_cmbMailMatchMode.ListIndex = 0
+    sy = sy + ROW_H + 14
+
+    Lbl m_fraSource, "lblKC", 6, sy, lblW, "Key:"
+    Set m_cmbKeyColumn = Cmb(m_fraSource, "cmbKC", inL, sy, inW)
+    sy = sy + ROW_H
+
+    Lbl m_fraSource, "lblFL", 6, sy, lblW, "File Link:"
+    Set m_cmbFileLink = Cmb(m_fraSource, "cmbFL", inL, sy, inW)
+    sy = sy + ROW_H
+
+    Lbl m_fraSource, "lblML", 6, sy, lblW, "Mail Link:"
+    Set m_cmbMailLink = Cmb(m_fraSource, "cmbML", inL, sy, inW)
 
     ' === Fields page (standard Frame with scroll) ===
     Set m_fraFields = Me.Controls.Add("Forms.Frame.1", "fraFld")
@@ -228,6 +243,12 @@ Private Sub LoadConfig()
     End If
 
     BuildFieldRows
+    PopulateColumnCombos
+    If Len(savedSource) > 0 Then
+        SelectComboItem m_cmbKeyColumn, CaseDeskLib.GetSourceStr(savedSource, "key_column")
+        SelectComboItem m_cmbFileLink, CaseDeskLib.GetSourceStr(savedSource, "folder_link_column")
+        SelectComboItem m_cmbMailLink, CaseDeskLib.GetSourceStr(savedSource, "mail_link_column")
+    End If
     m_suppressEvents = False
 End Sub
 
@@ -303,19 +324,15 @@ Private Sub BuildFieldRows()
         End If
     End If
 
-    SyncRolesFromSource src
-
     ' Column positions (proportional)
     Dim fw As Single: fw = m_fraFields.Width - 22
     Dim x1 As Single: x1 = 6                    ' Column name
     Dim x2 As Single: x2 = fw * 0.25            ' Display name
-    Dim x3 As Single: x3 = fw * 0.50            ' Vis
-    Dim x4 As Single: x4 = fw * 0.56            ' Edit
-    Dim x5 As Single: x5 = fw * 0.62            ' Type
-    Dim x6 As Single: x6 = fw * 0.78            ' Role
+    Dim x3 As Single: x3 = fw * 0.54            ' Vis
+    Dim x4 As Single: x4 = fw * 0.62            ' Edit
+    Dim x5 As Single: x5 = fw * 0.70            ' Type
     Dim w2 As Single: w2 = x3 - x2 - 4
-    Dim w5 As Single: w5 = x6 - x5 - 4
-    Dim w6 As Single: w6 = fw - x6
+    Dim w5 As Single: w5 = fw - x5
     Dim y As Single: y = 18
 
     ' Header
@@ -325,7 +342,6 @@ Private Sub BuildFieldRows()
     Set lh = Lbl(m_fraFields, "hV", x3, 2, 36, "Vis"): lh.Font.Bold = True
     Set lh = Lbl(m_fraFields, "hE", x4, 2, 36, "Edit"): lh.Font.Bold = True
     Set lh = Lbl(m_fraFields, "hT", x5, 2, w5, "Type"): lh.Font.Bold = True
-    Set lh = Lbl(m_fraFields, "hR", x6, 2, w6, "Role"): lh.Font.Bold = True
 
     Dim fields As Collection: Set fields = CaseDeskLib.GetFieldNames(src)
     Dim i As Long
@@ -358,16 +374,9 @@ Private Sub BuildFieldRows()
         SelectComboItem ct, savedType
         If ct.ListIndex < 0 Then ct.ListIndex = 0
 
-        Dim cr As MSForms.ComboBox: Set cr = Cmb(m_fraFields, "rl_" & i, x6, y - 2, w6)
-        cr.Height = 20: cr.Font.Size = 9
-        cr.AddItem "": cr.AddItem "case_id": cr.AddItem "title": cr.AddItem "status"
-        cr.AddItem "file_key": cr.AddItem "updated_at": cr.AddItem "mail_link"
-        SelectComboItem cr, CaseDeskLib.GetFieldStr(src, fld, "role")
-        If cr.ListIndex < 0 Then cr.ListIndex = 0
-
         Dim row As Object: Set row = CreateObject("Scripting.Dictionary")
         Set row("display") = td: Set row("visible") = cv: Set row("editable") = ce
-        Set row("type") = ct: Set row("role") = cr: row("order") = CStr(i)
+        Set row("type") = ct: row("order") = CStr(i)
         Set m_fieldRows(fld) = row
 
         y = y + GRID_ROW_H
@@ -379,30 +388,17 @@ FieldRowsExit:
     On Error GoTo 0
 End Sub
 
-Private Sub SyncRolesFromSource(src As String)
-    Dim mapping(3, 1) As String
-    mapping(0, 0) = "key_column":          mapping(0, 1) = "case_id"
-    mapping(1, 0) = "display_name_column": mapping(1, 1) = "title"
-    mapping(2, 0) = "mail_link_column":    mapping(2, 1) = "mail_link"
-    mapping(3, 0) = "folder_link_column":  mapping(3, 1) = "file_key"
+Private Sub PopulateColumnCombos()
+    m_cmbKeyColumn.Clear: m_cmbFileLink.Clear: m_cmbMailLink.Clear
+    Dim src As String: src = m_cmbTable.Text
+    If Len(src) = 0 Then Exit Sub
+    Dim fields As Collection: Set fields = CaseDeskLib.GetFieldNames(src)
     Dim i As Long
-    For i = 0 To 3
-        Dim colName As String: colName = CaseDeskLib.GetSourceStr(src, mapping(i, 0))
-        Dim roleName As String: roleName = mapping(i, 1)
-        If Len(colName) = 0 Then GoTo NextMapping
-        Dim alreadyAssigned As Boolean: alreadyAssigned = False
-        Dim fields As Collection: Set fields = CaseDeskLib.GetFieldNames(src)
-        Dim j As Long
-        For j = 1 To fields.Count
-            If CaseDeskLib.GetFieldStr(src, CStr(fields(j)), "role") = roleName Then alreadyAssigned = True: Exit For
-        Next j
-        If Not alreadyAssigned Then
-            If Len(CaseDeskLib.GetFieldStr(src, colName, "field_name")) > 0 Or _
-               Len(CaseDeskLib.GetFieldStr(src, colName, "type")) > 0 Then
-                CaseDeskLib.SetFieldStr src, colName, "role", roleName
-            End If
-        End If
-NextMapping:
+    For i = 1 To fields.Count
+        Dim fn As String: fn = CStr(fields(i))
+        m_cmbKeyColumn.AddItem fn
+        m_cmbFileLink.AddItem fn
+        m_cmbMailLink.AddItem fn
     Next i
 End Sub
 
@@ -475,6 +471,7 @@ Private Sub m_cmbTable_Change()
     m_suppressEvents = True
     On Error GoTo Cleanup
     BuildFieldRows
+    PopulateColumnCombos
 Cleanup: m_suppressEvents = False
 End Sub
 
@@ -499,32 +496,10 @@ Private Sub m_cmdSave_Click()
     On Error GoTo ErrHandler
     If Len(m_cmbTable.Text) = 0 Then MsgBox "Table selection is required.", vbExclamation, "Settings": Exit Sub
 
-    Dim roleMap As Object: Set roleMap = CreateObject("Scripting.Dictionary")
-    Dim fld As Variant
-    For Each fld In m_fieldRows.Keys
-        Dim rr As Object: Set rr = m_fieldRows(fld)
-        Dim rn As String: rn = Trim$(CStr(rr("role").Text))
-        If Len(rn) > 0 Then
-            If roleMap.Exists(rn) Then
-                MsgBox "Role """ & rn & """ is assigned to multiple columns.", vbExclamation, "Settings": Exit Sub
-            End If
-            roleMap(rn) = CStr(fld)
-        End If
-    Next fld
-
     Dim missing As String
-    If Not roleMap.Exists("case_id") Then missing = missing & "  - Case ID" & vbCrLf
-    If Not roleMap.Exists("title") Then missing = missing & "  - Title" & vbCrLf
+    If m_cmbKeyColumn.ListIndex < 0 Then missing = missing & "  - Key Column" & vbCrLf
     If Len(missing) > 0 Then
-        MsgBox "Required roles not assigned:" & vbCrLf & vbCrLf & missing, vbExclamation, "Settings": Exit Sub
-    End If
-
-    Dim warn As String
-    If Not roleMap.Exists("status") Then warn = warn & "  - Status" & vbCrLf
-    If Not roleMap.Exists("file_key") Then warn = warn & "  - File Key" & vbCrLf
-    If Not roleMap.Exists("updated_at") Then warn = warn & "  - Updated Date" & vbCrLf
-    If Len(warn) > 0 Then
-        If MsgBox("Recommended roles not assigned:" & vbCrLf & vbCrLf & warn & vbCrLf & "Continue?", vbQuestion + vbYesNo, "Settings") = vbNo Then Exit Sub
+        MsgBox "Required settings:" & vbCrLf & vbCrLf & missing, vbExclamation, "Settings": Exit Sub
     End If
 
     Dim src As String: src = m_cmbTable.Text
@@ -533,11 +508,14 @@ Private Sub m_cmdSave_Click()
     CaseDeskLib.SetStr "case_folder_root", m_txtCaseFolder.Text
     CaseDeskLib.SetSourceStr src, "source_sheet", m_cmbSheet.Text
     CaseDeskLib.SetSourceStr src, "mail_match_mode", m_cmbMailMatchMode.Text
+    CaseDeskLib.SetSourceStr src, "key_column", m_cmbKeyColumn.Text
+    CaseDeskLib.SetSourceStr src, "folder_link_column", m_cmbFileLink.Text
+    CaseDeskLib.SetSourceStr src, "mail_link_column", m_cmbMailLink.Text
 
+    Dim fld As Variant
     For Each fld In m_fieldRows.Keys
         Dim row As Object: Set row = m_fieldRows(fld)
         Dim ft As String: ft = CStr(row("type").Text)
-        Dim fr As String: fr = Trim$(CStr(row("role").Text))
         CaseDeskLib.SetFieldStr src, CStr(fld), "display_name", Trim$(CStr(row("display").Text))
         CaseDeskLib.SetFieldBool src, CStr(fld), "visible", CBool(row("visible").Value)
         CaseDeskLib.SetFieldBool src, CStr(fld), "in_list", CBool(row("visible").Value)
@@ -545,17 +523,7 @@ Private Sub m_cmdSave_Click()
         CaseDeskLib.SetFieldStr src, CStr(fld), "type", ft
         CaseDeskLib.SetFieldBool src, CStr(fld), "multiline", (ft = "multiline")
         CaseDeskLib.SetFieldStr src, CStr(fld), "sort_order", CStr(row("order"))
-        CaseDeskLib.SetFieldStr src, CStr(fld), "role", fr
     Next fld
-
-    If roleMap.Exists("case_id") Then CaseDeskLib.SetSourceStr src, "key_column", CStr(roleMap("case_id"))
-    If roleMap.Exists("title") Then CaseDeskLib.SetSourceStr src, "display_name_column", CStr(roleMap("title"))
-    If roleMap.Exists("mail_link") Then CaseDeskLib.SetSourceStr src, "mail_link_column", CStr(roleMap("mail_link"))
-    If roleMap.Exists("file_key") Then CaseDeskLib.SetSourceStr src, "folder_link_column", CStr(roleMap("file_key"))
-    If Not roleMap.Exists("case_id") Then CaseDeskLib.SetSourceStr src, "key_column", ""
-    If Not roleMap.Exists("title") Then CaseDeskLib.SetSourceStr src, "display_name_column", ""
-    If Not roleMap.Exists("mail_link") Then CaseDeskLib.SetSourceStr src, "mail_link_column", ""
-    If Not roleMap.Exists("file_key") Then CaseDeskLib.SetSourceStr src, "folder_link_column", ""
 
     CaseDeskLib.SaveToSheets
     Unload Me

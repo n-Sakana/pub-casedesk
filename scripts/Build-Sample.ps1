@@ -77,19 +77,44 @@ try {
     #   審査_xxx    → "審査" tab (normal, editable)
     #   _基本_登録日 → "基本" tab (readonly, _xx_AAA prefix)
     #   __内部メモ   → hidden in UI (__AAA prefix), usable as setting column
+    # 12 prefix groups → 12 tabs, 36 columns total
     $headers = @(
-        '案件ID',             # key column (no prefix → "_other" tab)
-        '基本_団体名',         # 基本 tab
-        '基本_代表者',         # 基本 tab
-        '基本_メールアドレス',  # 基本 tab (mail link column)
-        '基本_申請日',         # 基本 tab (date type)
-        '基本_申請額',         # 基本 tab (currency type, comma formatting)
-        '審査_ステータス',     # 審査 tab
-        '審査_担当者',         # 審査 tab
-        '審査_不足書類',       # 審査 tab
-        '審査_備考',           # 審査 tab (multiline)
-        '_基本_登録日',        # readonly prefix: visible but not editable
-        '__内部メモ'           # hidden prefix: not shown in UI, usable in settings
+        '案件ID',               #  1  key (no prefix)
+        '基本_団体名',           #  2  基本
+        '基本_代表者',           #  3
+        '基本_メールアドレス',    #  4
+        '基本_電話番号',         #  5
+        '基本_住所',             #  6
+        '基本_申請日',           #  7
+        '基本_申請額',           #  8
+        '審査_ステータス',       #  9  審査
+        '審査_担当者',           # 10
+        '審査_不足書類',         # 11
+        '審査_備考',             # 12
+        '審査_期限',             # 13
+        '審査_スコア',           # 14
+        '交付_決定日',           # 15  交付
+        '交付_交付額',           # 16
+        '交付_条件',             # 17
+        '報告_中間報告日',       # 18  報告
+        '報告_最終報告日',       # 19
+        '報告_実績額',           # 20
+        '報告_差額',             # 21
+        '経理_伝票番号',         # 22  経理
+        '経理_支払日',           # 23
+        '経理_支払額',           # 24
+        '連絡_最終連絡日',       # 25  連絡
+        '連絡_連絡手段',         # 26
+        '連絡_次回予定',         # 27
+        '法務_契約番号',         # 28  法務
+        '法務_契約日',           # 29
+        '法務_契約状態',         # 30
+        'IT_システムID',         # 31  IT
+        'IT_登録状態',           # 32
+        '管理_作成者',           # 33  管理
+        '管理_更新者',           # 34
+        '_基本_登録日',          # 35  readonly
+        '__内部メモ'             # 36  hidden
     )
     for ($c = 0; $c -lt $headers.Count; $c++) {
         $ws.Cells.Item(1, $c + 1).Value2 = $headers[$c]
@@ -98,6 +123,9 @@ try {
     # Generate rows
     Write-Host "Generating $Count rows..." -ForegroundColor Cyan
     $script:caseEmails = @{}
+    $contactMethods = @('電話','メール','訪問','Web会議','FAX')
+    $contractStatuses = @('有効','期限切れ','交渉中','解除')
+    $itStatuses = @('登録済','未登録','申請中')
 
     for ($r = 1; $r -le $Count; $r++) {
         $caseId = 'R06-' + $r.ToString('000')
@@ -116,20 +144,53 @@ try {
         $memo = if ((RandInt 1 5) -eq 1) { "備考メモ$r`nこの案件は要確認です。" } else { '' }
         $regDate = $applyDate.AddDays(-(RandInt 1 10)).ToString('yyyy/MM/dd')
         $internalNote = "内部ID:$r priority:$(RandInt 1 5)"
+        $grantDate = $applyDate.AddDays((RandInt 30 90)).ToString('yyyy/MM/dd')
+        $grantAmount = [double]([Math]::Floor($amount * (RandInt 70 100) / 100))
+        $midDate = $applyDate.AddDays((RandInt 60 120)).ToString('yyyy/MM/dd')
+        $finalDate = $applyDate.AddDays((RandInt 150 240)).ToString('yyyy/MM/dd')
+        $actualAmount = [double]([Math]::Floor($grantAmount * (RandInt 80 110) / 100))
+        $payDate = $applyDate.AddDays((RandInt 90 150)).ToString('yyyy/MM/dd')
+        $contactDate = $applyDate.AddDays((RandInt 10 60)).ToString('yyyy/MM/dd')
+        $nextContact = $applyDate.AddDays((RandInt 70 130)).ToString('yyyy/MM/dd')
+        $contractDate = $applyDate.AddDays(-(RandInt 30 365)).ToString('yyyy/MM/dd')
 
         $row = $r + 1
         $ws.Cells.Item($row, 1).Value2 = [string]$caseId
         $ws.Cells.Item($row, 2).Value2 = [string]$orgName
         $ws.Cells.Item($row, 3).Value2 = [string]$personName
         $ws.Cells.Item($row, 4).Value2 = [string]$email
-        $ws.Cells.Item($row, 5).Value2 = [string]$applyDate.ToString('yyyy/MM/dd')
-        $ws.Cells.Item($row, 6).Value2 = [double]$amount
-        $ws.Cells.Item($row, 7).Value2 = [string]$status
-        $ws.Cells.Item($row, 8).Value2 = [string]$staff
-        $ws.Cells.Item($row, 9).Value2 = [string]$missingDoc
-        $ws.Cells.Item($row, 10).Value2 = [string]$memo
-        $ws.Cells.Item($row, 11).Value2 = [string]$regDate
-        $ws.Cells.Item($row, 12).Value2 = [string]$internalNote
+        $ws.Cells.Item($row, 5).Value2 = '0' + (RandInt 3 9).ToString() + '-' + (RandInt 1000 9999).ToString() + '-' + (RandInt 1000 9999).ToString()
+        $ws.Cells.Item($row, 6).Value2 = (Pick $orgPrefixes) + '市' + (Pick $lastNames) + '町' + (RandInt 1 20).ToString()
+        $ws.Cells.Item($row, 7).Value2 = [string]$applyDate.ToString('yyyy/MM/dd')
+        $ws.Cells.Item($row, 8).Value2 = [double]$amount
+        $ws.Cells.Item($row, 9).Value2 = [string]$status
+        $ws.Cells.Item($row, 10).Value2 = [string]$staff
+        $ws.Cells.Item($row, 11).Value2 = [string]$missingDoc
+        $ws.Cells.Item($row, 12).Value2 = [string]$memo
+        $ws.Cells.Item($row, 13).Value2 = [string]$applyDate.AddDays((RandInt 14 30)).ToString('yyyy/MM/dd')
+        $ws.Cells.Item($row, 14).Value2 = [double](RandInt 1 100)
+        $ws.Cells.Item($row, 15).Value2 = [string]$grantDate
+        $ws.Cells.Item($row, 16).Value2 = [double]$grantAmount
+        $ws.Cells.Item($row, 17).Value2 = if ((RandInt 1 3) -eq 1) { '条件付き' } else { '' }
+        $ws.Cells.Item($row, 18).Value2 = [string]$midDate
+        $ws.Cells.Item($row, 19).Value2 = [string]$finalDate
+        $ws.Cells.Item($row, 20).Value2 = [double]$actualAmount
+        $ws.Cells.Item($row, 21).Value2 = [double]($actualAmount - $grantAmount)
+        $ws.Cells.Item($row, 22).Value2 = 'D-' + $r.ToString('0000')
+        $ws.Cells.Item($row, 23).Value2 = [string]$payDate
+        $ws.Cells.Item($row, 24).Value2 = [double]$grantAmount
+        $ws.Cells.Item($row, 25).Value2 = [string]$contactDate
+        $ws.Cells.Item($row, 26).Value2 = [string](Pick $contactMethods)
+        $ws.Cells.Item($row, 27).Value2 = [string]$nextContact
+        $ws.Cells.Item($row, 28).Value2 = 'C-' + (RandInt 1 500).ToString('0000')
+        $ws.Cells.Item($row, 29).Value2 = [string]$contractDate
+        $ws.Cells.Item($row, 30).Value2 = [string](Pick $contractStatuses)
+        $ws.Cells.Item($row, 31).Value2 = 'SYS-' + $r.ToString('0000')
+        $ws.Cells.Item($row, 32).Value2 = [string](Pick $itStatuses)
+        $ws.Cells.Item($row, 33).Value2 = [string](Pick $staffNames)
+        $ws.Cells.Item($row, 34).Value2 = [string](Pick $staffNames)
+        $ws.Cells.Item($row, 35).Value2 = [string]$regDate
+        $ws.Cells.Item($row, 36).Value2 = [string]$internalNote
 
         $script:caseEmails[$caseId] = @{ Email = $email; Name = $personName }
 
@@ -137,12 +198,17 @@ try {
     }
 
     # Format columns
-    $ws.Range("E2:E$($Count+1)").NumberFormat = 'yyyy/mm/dd'
-    $ws.Range("F2:F$($Count+1)").NumberFormat = '#,##0'
-    $ws.Range("K2:K$($Count+1)").NumberFormat = 'yyyy/mm/dd'
+    $fmtDate = 'yyyy/mm/dd'
+    $fmtNum = '#,##0'
+    foreach ($col in @(7, 13, 15, 18, 19, 23, 25, 27, 29, 35)) {
+        $ws.Range($ws.Cells.Item(2, $col), $ws.Cells.Item($Count + 1, $col)).NumberFormat = $fmtDate
+    }
+    foreach ($col in @(8, 14, 16, 20, 21, 24)) {
+        $ws.Range($ws.Cells.Item(2, $col), $ws.Cells.Item($Count + 1, $col)).NumberFormat = $fmtNum
+    }
 
     # Create table
-    $tblRange = $ws.Range($ws.Cells.Item(1, 1), $ws.Cells.Item($Count + 1, 12))
+    $tblRange = $ws.Range($ws.Cells.Item(1, 1), $ws.Cells.Item($Count + 1, $headers.Count))
     $lo = $ws.ListObjects.Add(1, $tblRange, $null, 1)
     $lo.Name = 'anken'
     $lo.TableStyle = 'TableStyleMedium2'
@@ -199,6 +265,47 @@ try {
     $ws2.Columns.AutoFit() | Out-Null
 
     Write-Host "  manual-mapping sheet: $extCount rows (no ListObject)" -ForegroundColor Green
+
+    # ================================================================
+    # Additional sheets (30 columns each, 8 sheets = 10 total)
+    # ================================================================
+    Write-Host "Generating additional sheets..." -ForegroundColor Cyan
+
+    $extraSheets = @(
+        @{ Name = '顧客管理'; Table = 'kokyaku'; Headers = @(
+            '顧客ID','顧客名','フリガナ','法人区分','代表者','郵便番号','住所','電話番号','FAX','メール',
+            '担当営業','ランク','業種','設立日','資本金','従業員数','年商','取引開始日','最終取引日','累計取引額',
+            'Webサイト','請求先住所','請求先担当','支払条件','与信限度額','取引銀行','口座番号','備考','登録日','更新日')
+        },
+        @{ Name = '契約管理'; Table = 'keiyaku'; Headers = @(
+            '契約番号','契約名','顧客ID','契約種別','契約開始日','契約終了日','月額','年額','初期費用','支払サイクル',
+            'ステータス','自動更新','担当者','担当メール','承認者','承認日','解約予告期間','SLA区分','上限ユーザ数','現ユーザ数',
+            '割引率','請求先','納品先','検収条件','ライセンスキー','サポートレベル','次回更新日','備考','作成日','更新日')
+        }
+    )
+
+    $extraRowCount = [Math]::Min($Count, 50)
+    foreach ($sheetDef in $extraSheets) {
+        $wsN = $wb.Sheets.Add([System.Type]::Missing, $wb.Sheets.Item($wb.Sheets.Count))
+        $wsN.Name = $sheetDef.Name
+        $hdrs = $sheetDef.Headers
+        for ($c = 0; $c -lt $hdrs.Count; $c++) {
+            $wsN.Cells.Item(1, $c + 1).Value2 = $hdrs[$c]
+        }
+        for ($r = 1; $r -le $extraRowCount; $r++) {
+            $row = $r + 1
+            for ($c = 0; $c -lt $hdrs.Count; $c++) {
+                $wsN.Cells.Item($row, $c + 1).Value2 = "sample-$r-$($c+1)"
+            }
+            $wsN.Cells.Item($row, 1).Value2 = $sheetDef.Table.Substring(0,1).ToUpper() + '-' + $r.ToString('000')
+        }
+        $tblR = $wsN.Range($wsN.Cells.Item(1, 1), $wsN.Cells.Item($extraRowCount + 1, $hdrs.Count))
+        $loN = $wsN.ListObjects.Add(1, $tblR, $null, 1)
+        $loN.Name = $sheetDef.Table
+        $loN.TableStyle = 'TableStyleMedium2'
+        $wsN.Columns.AutoFit() | Out-Null
+        Write-Host "  $($sheetDef.Name): $extraRowCount rows, $($hdrs.Count) columns" -ForegroundColor Green
+    }
 
     # Save
     if (-not (Test-Path $sampleOut)) { New-Item -ItemType Directory -Path $sampleOut -Force | Out-Null }
