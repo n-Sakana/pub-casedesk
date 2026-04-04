@@ -957,37 +957,46 @@ Public Function ExportSettings(filePath As String) As Boolean
     If Not m_loaded Then EnsureConfigSheets
     On Error GoTo ErrOut
 
-    Dim root As Object: Set root = NewDict()
+    Dim buf As String
+    Dim srcCols As Variant: srcCols = Array("source_name", "source_sheet", "key_column", "display_name_column", "mail_link_column", "folder_link_column", "mail_match_mode")
+    Dim fldCols As Variant: fldCols = Array("source_name", "field_name", "display_name", "type", "visible", "in_list", "editable", "multiline", "role", "sort_order")
 
-    ' config
-    Set root("config") = m_cfg
+    ' [config]
+    buf = "[config]" & vbCrLf & "key,value" & vbCrLf
+    Dim ck As Variant
+    For Each ck In m_cfg.keys
+        buf = buf & CsvEsc(CStr(ck)) & "," & CsvEsc(CStr(m_cfg(ck))) & vbCrLf
+    Next ck
 
-    ' sources (clone without lowercase key issue)
-    Dim srcOut As Object: Set srcOut = NewDict()
+    ' [sources]
+    buf = buf & vbCrLf & "[sources]" & vbCrLf & Join(srcCols, ",") & vbCrLf
     Dim sk As Variant
     For Each sk In m_sources.keys
         Dim sd As Object: Set sd = m_sources(sk)
-        Dim sName As String: sName = DictStr(sd, "source_name", CStr(sk))
-        Set srcOut(sName) = sd
+        Dim si As Long
+        For si = LBound(srcCols) To UBound(srcCols)
+            If si > LBound(srcCols) Then buf = buf & ","
+            buf = buf & CsvEsc(DictStr(sd, CStr(srcCols(si))))
+        Next si
+        buf = buf & vbCrLf
     Next sk
-    Set root("sources") = srcOut
 
-    ' fields grouped by source
-    Dim fldOut As Object: Set fldOut = NewDict()
+    ' [fields]
+    buf = buf & vbCrLf & "[fields]" & vbCrLf & Join(fldCols, ",") & vbCrLf
     Dim fk As Variant
     For Each fk In m_fields.keys
         Dim fd As Object: Set fd = m_fields(fk)
-        Dim fSrc As String: fSrc = DictStr(fd, "source_name")
-        Dim fName As String: fName = DictStr(fd, "field_name")
-        If Len(fSrc) = 0 Or Len(fName) = 0 Then GoTo NextField
-        If Not fldOut.Exists(fSrc) Then Set fldOut(fSrc) = NewDict()
-        Dim srcFields As Object: Set srcFields = fldOut(fSrc)
-        Set srcFields(fName) = fd
+        If Len(DictStr(fd, "source_name")) = 0 Or Len(DictStr(fd, "field_name")) = 0 Then GoTo NextField
+        Dim fi As Long
+        For fi = LBound(fldCols) To UBound(fldCols)
+            If fi > LBound(fldCols) Then buf = buf & ","
+            buf = buf & CsvEsc(DictStr(fd, CStr(fldCols(fi))))
+        Next fi
+        buf = buf & vbCrLf
 NextField:
     Next fk
-    Set root("fields") = fldOut
 
-    WriteTextFile filePath, ToJson(root, 0)
+    WriteTextFile filePath, buf
     ExportSettings = True
     Exit Function
 ErrOut:
@@ -996,62 +1005,69 @@ End Function
 
 Public Function ImportSettings(filePath As String) As Boolean
     On Error GoTo ErrOut
-    Dim json As String: json = ReadTextFile(filePath)
-    If Len(json) = 0 Then ImportSettings = False: Exit Function
-
-    Dim root As Object: Set root = ParseJson(json)
-    If root Is Nothing Then ImportSettings = False: Exit Function
+    Dim txt As String: txt = ReadTextFile(filePath)
+    If Len(txt) = 0 Then ImportSettings = False: Exit Function
     If Not m_loaded Then EnsureConfigSheets
 
-    ' Import config
-    Dim cfgObj As Object: Set cfgObj = DictObj(root, "config")
-    If Not cfgObj Is Nothing Then
-        Dim ck As Variant
-        For Each ck In cfgObj.keys
-            m_cfg(CStr(ck)) = CStr(cfgObj(ck))
-        Next ck
-    End If
+    Dim lines() As String: lines = Split(Replace$(txt, vbCr, ""), vbLf)
+    Dim section As String
+    Dim headers() As String
+    Dim i As Long
+    For i = 0 To UBound(lines)
+        Dim ln As String: ln = Trim$(lines(i))
+        If Len(ln) = 0 Then GoTo NextLine
 
-    ' Import sources
-    Dim srcObj As Object: Set srcObj = DictObj(root, "sources")
-    If Not srcObj Is Nothing Then
-        Dim sk2 As Variant
-        For Each sk2 In srcObj.keys
-            Dim srcName As String: srcName = CStr(sk2)
-            Dim importSrc As Object: Set importSrc = srcObj(sk2)
+        ' Section header
+        If Left$(ln, 1) = "[" Then
+            section = Mid$(ln, 2, Len(ln) - 2)
+            ' Next non-empty line is the header row
+            Dim h As Long
+            For h = i + 1 To UBound(lines)
+                If Len(Trim$(lines(h))) > 0 Then
+                    headers = ParseCsvLine(lines(h))
+                    i = h
+                    Exit For
+                End If
+            Next h
+            GoTo NextLine
+        End If
+
+        Dim cols() As String: cols = ParseCsvLine(ln)
+
+        Select Case section
+        Case "config"
+            If UBound(cols) >= 1 Then m_cfg(cols(0)) = cols(1)
+
+        Case "sources"
+            Dim srcName As String: srcName = cols(0)
+            If Len(srcName) = 0 Then GoTo NextLine
             If Not m_sources.Exists(srcName) Then Set m_sources(srcName) = NewDict()
             Dim tgtSrc As Object: Set tgtSrc = m_sources(srcName)
-            Dim sc As Variant
-            For Each sc In importSrc.keys
-                tgtSrc(CStr(sc)) = CStr(importSrc(sc))
+            Dim sc As Long
+            For sc = 0 To UBound(cols)
+                If sc <= UBound(headers) Then tgtSrc(headers(sc)) = cols(sc)
             Next sc
-        Next sk2
-    End If
 
-    ' Import fields
-    Dim fldObj As Object: Set fldObj = DictObj(root, "fields")
-    If Not fldObj Is Nothing Then
-        Dim fs As Variant
-        For Each fs In fldObj.keys
-            Dim srcFlds As Object: Set srcFlds = fldObj(fs)
-            Dim fn As Variant
-            For Each fn In srcFlds.keys
-                Dim fDict As Object: Set fDict = srcFlds(fn)
-                Dim fk2 As String: fk2 = LCase$(CStr(fs)) & "|" & LCase$(CStr(fn))
-                If Not m_fields.Exists(fk2) Then
-                    Dim newFd As Object: Set newFd = NewDict()
-                    newFd("source_name") = CStr(fs)
-                    newFd("field_name") = CStr(fn)
-                    Set m_fields(fk2) = newFd
-                End If
-                Dim tgtFd As Object: Set tgtFd = m_fields(fk2)
-                Dim fc As Variant
-                For Each fc In fDict.keys
-                    tgtFd(CStr(fc)) = CStr(fDict(fc))
-                Next fc
-            Next fn
-        Next fs
-    End If
+        Case "fields"
+            If UBound(cols) < 1 Then GoTo NextLine
+            Dim fSrc As String: fSrc = cols(0)
+            Dim fName As String: fName = cols(1)
+            If Len(fSrc) = 0 Or Len(fName) = 0 Then GoTo NextLine
+            Dim fk2 As String: fk2 = LCase$(fSrc) & "|" & LCase$(fName)
+            If Not m_fields.Exists(fk2) Then
+                Dim newFd As Object: Set newFd = NewDict()
+                newFd("source_name") = fSrc
+                newFd("field_name") = fName
+                Set m_fields(fk2) = newFd
+            End If
+            Dim tgtFd As Object: Set tgtFd = m_fields(fk2)
+            Dim fc As Long
+            For fc = 0 To UBound(cols)
+                If fc <= UBound(headers) Then tgtFd(headers(fc)) = cols(fc)
+            Next fc
+        End Select
+NextLine:
+    Next i
 
     m_dirty = True
     SaveToSheets
@@ -1059,6 +1075,47 @@ Public Function ImportSettings(filePath As String) As Boolean
     Exit Function
 ErrOut:
     ImportSettings = False
+End Function
+
+Private Function CsvEsc(v As String) As String
+    If InStr(v, ",") > 0 Or InStr(v, """") > 0 Or InStr(v, vbLf) > 0 Or InStr(v, vbCr) > 0 Then
+        CsvEsc = """" & Replace$(v, """", """""") & """"
+    Else
+        CsvEsc = v
+    End If
+End Function
+
+Private Function ParseCsvLine(ln As String) As String()
+    Dim result() As String
+    Dim cnt As Long: cnt = 0
+    Dim pos As Long: pos = 1
+    Dim inQuote As Boolean
+    Dim cur As String
+    Do While pos <= Len(ln)
+        Dim ch As String: ch = Mid$(ln, pos, 1)
+        If inQuote Then
+            If ch = """" Then
+                If pos < Len(ln) And Mid$(ln, pos + 1, 1) = """" Then
+                    cur = cur & """": pos = pos + 1
+                Else
+                    inQuote = False
+                End If
+            Else
+                cur = cur & ch
+            End If
+        Else
+            If ch = """" Then
+                inQuote = True
+            ElseIf ch = "," Then
+                ReDim Preserve result(cnt): result(cnt) = cur: cnt = cnt + 1: cur = ""
+            Else
+                cur = cur & ch
+            End If
+        End If
+        pos = pos + 1
+    Loop
+    ReDim Preserve result(cnt): result(cnt) = cur
+    ParseCsvLine = result
 End Function
 
 ' ============================================================================

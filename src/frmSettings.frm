@@ -564,8 +564,9 @@ ErrHandler: eh.Catch
 End Sub
 
 Private Sub m_cmdExport_Click()
-    With Application.FileDialog(msoFileDialogSaveAs)
-        .Title = "Export Settings": .InitialFileName = "casedesk-settings.json": .FilterIndex = 1
+    With Application.FileDialog(msoFileDialogFilePicker)
+        .Title = "Export Settings": .Filters.Clear: .Filters.Add "CSV", "*.csv"
+        .AllowMultiSelect = False: .InitialFileName = "casedesk-settings.csv"
         If .Show = -1 Then
             If CaseDeskLib.ExportSettings(.SelectedItems(1)) Then
                 MsgBox "Settings exported.", vbInformation, "Export"
@@ -576,7 +577,7 @@ End Sub
 
 Private Sub m_cmdImport_Click()
     With Application.FileDialog(msoFileDialogFilePicker)
-        .Title = "Import Settings": .Filters.Clear: .Filters.Add "JSON", "*.json": .AllowMultiSelect = False
+        .Title = "Import Settings": .Filters.Clear: .Filters.Add "CSV", "*.csv": .AllowMultiSelect = False
         If .Show = -1 Then
             If MsgBox("Import from:" & vbCrLf & .SelectedItems(1) & vbCrLf & vbCrLf & "Overwrite current settings?", vbQuestion + vbYesNo, "Import") = vbYes Then
                 If CaseDeskLib.ImportSettings(.SelectedItems(1)) Then
