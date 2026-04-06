@@ -282,18 +282,72 @@ Private Sub LoadTablesForSelectedSheet()
     Set ws = wb.Worksheets(m_cmbSheet.Text)
     On Error GoTo 0
     If ws Is Nothing Then Exit Sub
+
+    ' 1. Tables (ListObjects) — primary option
     Dim tbl As ListObject
     For Each tbl In ws.ListObjects: m_cmbTable.AddItem tbl.Name: Next tbl
+
+    ' 2. Named ranges on this sheet (both workbook-scope and sheet-scope)
+    Dim nm As Name
+    Dim nmRange As Range
+    For Each nm In wb.Names
+        Set nmRange = Nothing
+        On Error Resume Next
+        Set nmRange = nm.RefersToRange
+        On Error GoTo 0
+        If Not nmRange Is Nothing Then
+            If nmRange.Worksheet.Name = ws.Name Then
+                If nmRange.Rows.Count > 1 And nmRange.Columns.Count > 1 Then
+                    ' Use local name if sheet-scoped (strip "Sheet1!" prefix)
+                    Dim nmDisplay As String: nmDisplay = nm.Name
+                    If InStr(nmDisplay, "!") > 0 Then nmDisplay = Mid$(nmDisplay, InStr(nmDisplay, "!") + 1)
+                    ' Avoid duplicates with table names
+                    If Not ComboContains(m_cmbTable, nmDisplay) Then
+                        m_cmbTable.AddItem nmDisplay
+                    End If
+                End If
+            End If
+            Set nmRange = Nothing
+        End If
+    Next nm
+
+    ' If we have tables or named ranges, keep dropdown-list mode
+    ' Otherwise allow direct range input (freeform combo)
     If m_cmbTable.ListCount = 0 Then
         m_cmbTable.Style = fmStyleDropDownCombo
+        ' Suggest UsedRange as starting point
         On Error Resume Next
         Dim ur As Range: Set ur = ws.UsedRange
         On Error GoTo 0
         If Not ur Is Nothing Then
             If ur.Rows.Count > 1 And ur.Columns.Count > 1 Then m_cmbTable.AddItem ur.Address(False, False)
         End If
+    Else
+        ' Even with tables/named ranges, allow direct entry as last resort
+        m_cmbTable.Style = fmStyleDropDownCombo
+    End If
+
+    ' Restore saved source if it was a custom range not in the list
+    Dim savedSource As String: savedSource = ""
+    Dim sources As Collection: Set sources = CaseDeskLib.GetSourceNames()
+    If sources.Count > 0 Then savedSource = CStr(sources(1))
+    If Len(savedSource) > 0 Then
+        Dim savedSheet As String: savedSheet = CaseDeskLib.GetSourceStr(savedSource, "source_sheet")
+        If savedSheet = m_cmbSheet.Text Then
+            If Not ComboContains(m_cmbTable, savedSource) Then
+                ' Saved range not in list — add it so it persists
+                m_cmbTable.AddItem savedSource
+            End If
+        End If
     End If
 End Sub
+
+Private Function ComboContains(cmb As MSForms.ComboBox, val As String) As Boolean
+    Dim i As Long
+    For i = 0 To cmb.ListCount - 1
+        If LCase$(cmb.List(i)) = LCase$(val) Then ComboContains = True: Exit Function
+    Next i
+End Function
 
 ' ============================================================================
 ' Field Grid
@@ -433,21 +487,45 @@ End Sub
 
 Private Function GetColumnsFromRange(ws As Worksheet, rangeAddr As String) As Collection
     Set GetColumnsFromRange = New Collection
+    Dim rng As Range
+    ' Try workbook-scope named range
     On Error Resume Next
-    Dim rng As Range: Set rng = ws.Range(rangeAddr)
+    Set rng = ws.Parent.Names(rangeAddr).RefersToRange
     On Error GoTo 0
+    ' Try sheet-scope named range (Sheet1!MyRange)
+    If rng Is Nothing Then
+        On Error Resume Next
+        Set rng = ws.Parent.Names(ws.Name & "!" & rangeAddr).RefersToRange
+        On Error GoTo 0
+    End If
+    ' Then try direct address
+    If rng Is Nothing Then
+        On Error Resume Next
+        Set rng = ws.Range(rangeAddr)
+        On Error GoTo 0
+    End If
     If rng Is Nothing Then: On Error Resume Next: Set rng = ws.UsedRange: On Error GoTo 0
     If rng Is Nothing Then Exit Function
     If rng.Columns.Count < 1 Then Exit Function
-    Dim hd As Variant
-    If rng.Columns.Count = 1 Then
-        ReDim hd(1 To 1, 1 To 1): hd(1, 1) = rng.Cells(1, 1).Value
-    Else: hd = rng.Rows(1).Value: End If
+    ' Guard against excessively large ranges
+    If rng.Rows.Count > 200000 Or rng.Columns.Count > 1000 Then
+        On Error Resume Next: Set rng = ws.UsedRange: On Error GoTo 0
+        If rng Is Nothing Then Exit Function
+    End If
     Dim c As Long
-    For c = 1 To UBound(hd, 2)
-        If Not IsEmpty(hd(1, c)) Then
-            Dim v As String: v = CStr(hd(1, c))
-            If Len(v) > 0 Then GetColumnsFromRange.Add v
+    For c = 1 To rng.Columns.Count
+        Dim cell As Range: Set cell = rng.Cells(1, c)
+        ' Handle merged cells: use the merge area's first cell value
+        Dim v As Variant
+        On Error Resume Next
+        If cell.MergeCells Then
+            v = cell.MergeArea.Cells(1, 1).Value
+        Else
+            v = cell.Value
+        End If
+        On Error GoTo 0
+        If Not IsEmpty(v) Then
+            If Len(CStr(v)) > 0 Then GetColumnsFromRange.Add CStr(v)
         End If
     Next c
 End Function
@@ -503,6 +581,12 @@ Private Sub m_cmdSave_Click()
     End If
 
     Dim src As String: src = m_cmbTable.Text
+    ' Remove old source entries that differ from current selection
+    Dim oldSources As Collection: Set oldSources = CaseDeskLib.GetSourceNames()
+    Dim os As Long
+    For os = 1 To oldSources.Count
+        If CStr(oldSources(os)) <> src Then CaseDeskLib.RemoveSource CStr(oldSources(os))
+    Next os
     CaseDeskLib.EnsureSource src
     CaseDeskLib.SetStr "mail_folder", m_txtMailFolder.Text
     CaseDeskLib.SetStr "case_folder_root", m_txtCaseFolder.Text

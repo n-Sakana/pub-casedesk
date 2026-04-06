@@ -70,9 +70,18 @@ Public Function ReadTableRecords(tbl As ListObject) As Object
     End If
     Dim nCols As Long: nCols = tbl.ListColumns.Count
     Dim colNames() As String: ReDim colNames(1 To nCols)
+    Dim seenCols As Object: Set seenCols = CaseDeskLib.NewDict()
     Dim c As Long
     For c = 1 To nCols
-        colNames(c) = tbl.ListColumns(c).Name
+        Dim cn As String: cn = tbl.ListColumns(c).Name
+        ' Handle duplicate column names by appending suffix
+        If seenCols.Exists(cn) Then
+            Dim suffix As Long: suffix = 2
+            Do While seenCols.Exists(cn & "_" & suffix): suffix = suffix + 1: Loop
+            cn = cn & "_" & suffix
+        End If
+        seenCols(cn) = True
+        colNames(c) = cn
     Next c
     Dim r As Long
     For r = 1 To UBound(data, 1)

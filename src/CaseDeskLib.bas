@@ -475,8 +475,11 @@ End Sub
 Public Sub LoadFromSheets()
     On Error Resume Next
     Set m_cfg = CreateObject("Scripting.Dictionary")
+    m_cfg.CompareMode = vbTextCompare
     Set m_sources = CreateObject("Scripting.Dictionary")
+    m_sources.CompareMode = vbTextCompare
     Set m_fields = CreateObject("Scripting.Dictionary")
+    m_fields.CompareMode = vbTextCompare
 
     ' Load config KV
     Dim wsCfg As Worksheet: Set wsCfg = ThisWorkbook.Worksheets(SH_CONFIG)
@@ -606,6 +609,23 @@ Public Sub EnsureSource(src As String)
     If Not m_sources.Exists(src) Then
         Set m_sources(src) = CreateObject("Scripting.Dictionary")
         m_sources(src)("source_name") = src
+        m_dirty = True
+    End If
+End Sub
+
+Public Sub RemoveSource(src As String)
+    If Not m_loaded Then EnsureConfigSheets
+    If m_sources.Exists(src) Then
+        m_sources.Remove src
+        ' Also remove associated field entries
+        Dim prefix As String: prefix = LCase$(src) & "|"
+        Dim toRemove As New Collection
+        Dim k As Variant
+        For Each k In m_fields.keys
+            If Left$(CStr(k), Len(prefix)) = prefix Then toRemove.Add CStr(k)
+        Next k
+        Dim i As Long
+        For i = 1 To toRemove.Count: m_fields.Remove CStr(toRemove(i)): Next i
         m_dirty = True
     End If
 End Sub
@@ -745,10 +765,26 @@ End Sub
 
 Public Sub InitFieldSettingsFromRange(src As String, ws As Worksheet)
     If Not m_loaded Then EnsureConfigSheets
+    Dim ur As Range
+    ' Try to resolve src as named range or direct address before falling back to UsedRange
     On Error Resume Next
-    If ws.UsedRange Is Nothing Then Exit Sub
-    Dim ur As Range: Set ur = ws.UsedRange
+    Set ur = ws.Parent.Names(src).RefersToRange
     On Error GoTo 0
+    If ur Is Nothing Then
+        On Error Resume Next
+        Set ur = ws.Parent.Names(ws.Name & "!" & src).RefersToRange
+        On Error GoTo 0
+    End If
+    If ur Is Nothing Then
+        On Error Resume Next
+        Set ur = ws.Range(src)
+        On Error GoTo 0
+    End If
+    If ur Is Nothing Then
+        On Error Resume Next
+        Set ur = ws.UsedRange
+        On Error GoTo 0
+    End If
     If ur Is Nothing Then Exit Sub
 
     Dim headerRow As Long: headerRow = ur.Row

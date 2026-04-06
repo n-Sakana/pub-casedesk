@@ -613,6 +613,26 @@ Private Function GetDataWorkbook() As Workbook
     Set GetDataWorkbook = CaseDeskMain.g_dataWb
 End Function
 
+Private Function SanitizeTableName(s As String) As String
+    Dim result As String, i As Long, ch As String
+    For i = 1 To Len(s)
+        ch = Mid$(s, i, 1)
+        If ch Like "[A-Za-z0-9_]" Or (ch >= ChrW(&H3000)) Then
+            result = result & ch
+        Else
+            result = result & "_"
+        End If
+    Next i
+    ' Table names must start with letter or underscore
+    If Len(result) > 0 Then
+        If Not (Left$(result, 1) Like "[A-Za-z_]" Or Left$(result, 1) >= ChrW(&H3000)) Then
+            result = "_" & result
+        End If
+    End If
+    If Len(result) = 0 Then result = "CaseDesk_Table"
+    SanitizeTableName = result
+End Function
+
 Private Sub SwitchSource(sourceName As String)
     Dim eh As New ErrorHandler: eh.Enter "frmCaseDesk", "SwitchSource"
     On Error GoTo ErrHandler
@@ -620,9 +640,25 @@ Private Sub SwitchSource(sourceName As String)
 
     m_currentSource = sourceName
     Dim wb As Workbook: Set wb = GetDataWorkbook()
-    Set m_currentTable = CaseDeskData.FindTable(wb, sourceName)
 
-    ' No ListObject found — create one from UsedRange on the source sheet
+    ' Try FindTable on the configured sheet first to avoid cross-sheet matches
+    Dim sourceSheet As String: sourceSheet = CaseDeskLib.GetSourceStr(sourceName, "source_sheet")
+    If Len(sourceSheet) > 0 And Not wb Is Nothing Then
+        Dim wsCheck As Worksheet
+        On Error Resume Next
+        Set wsCheck = wb.Worksheets(sourceSheet)
+        On Error GoTo ErrHandler
+        If Not wsCheck Is Nothing Then
+            Dim t As ListObject
+            For Each t In wsCheck.ListObjects
+                If LCase$(t.Name) = LCase$(sourceName) Then Set m_currentTable = t: Exit For
+            Next t
+        End If
+    End If
+    ' Fallback: search all sheets
+    If m_currentTable Is Nothing Then Set m_currentTable = CaseDeskData.FindTable(wb, sourceName)
+
+    ' No ListObject found — try named range, then saved range address, then UsedRange
     If m_currentTable Is Nothing And Not wb Is Nothing Then
         Dim sheetName As String: sheetName = CaseDeskLib.GetSourceStr(sourceName, "source_sheet")
         If Len(sheetName) = 0 Then sheetName = sourceName
@@ -631,14 +667,60 @@ Private Sub SwitchSource(sourceName As String)
         Set ws = wb.Worksheets(sheetName)
         On Error GoTo ErrHandler
         If Not ws Is Nothing Then
-            If ws.ListObjects.Count > 0 Then
-                Set m_currentTable = ws.ListObjects(1)
+            ' Reuse existing CaseDesk table if already created from previous session
+            Dim tblName As String: tblName = SanitizeTableName("CaseDesk_" & sheetName)
+            Dim existTbl As ListObject
+            On Error Resume Next
+            Set existTbl = ws.ListObjects(tblName)
+            On Error GoTo ErrHandler
+            If Not existTbl Is Nothing Then
+                Set m_currentTable = existTbl
             Else
-                Dim ur As Range: Set ur = ws.UsedRange
-                If Not ur Is Nothing Then
-                    If ur.Rows.Count > 1 And ur.Columns.Count > 1 Then
-                        Set m_currentTable = ws.ListObjects.Add(xlSrcRange, ur, , xlYes)
-                        m_currentTable.Name = "CaseDesk_" & Replace(sheetName, " ", "_")
+                Dim srcRange As Range
+                ' Try named range first (both workbook-scope and sheet-scope)
+                On Error Resume Next
+                Set srcRange = wb.Names(sourceName).RefersToRange
+                On Error GoTo ErrHandler
+                If srcRange Is Nothing Then
+                    On Error Resume Next
+                    Set srcRange = wb.Names(ws.Name & "!" & sourceName).RefersToRange
+                    On Error GoTo ErrHandler
+                End If
+                ' Try as direct range address (e.g. "A7:BB276")
+                If srcRange Is Nothing Then
+                    On Error Resume Next
+                    Set srcRange = ws.Range(sourceName)
+                    On Error GoTo ErrHandler
+                End If
+                ' Validate and create table from resolved range
+                If Not srcRange Is Nothing Then
+                    ' Guard against whole-column/whole-row ranges that would freeze Excel
+                    If srcRange.Rows.Count > 200000 Or srcRange.Columns.Count > 1000 Then
+                        Set srcRange = Nothing
+                    ElseIf srcRange.Rows.Count > 1 And srcRange.Columns.Count > 1 Then
+                        Set m_currentTable = ws.ListObjects.Add(xlSrcRange, srcRange, , xlYes)
+                        On Error Resume Next
+                        m_currentTable.Name = tblName
+                        On Error GoTo ErrHandler
+                    Else
+                        Set srcRange = Nothing
+                    End If
+                End If
+            End If
+            ' Final fallback: first existing table or UsedRange
+            If m_currentTable Is Nothing Then
+                If ws.ListObjects.Count > 0 Then
+                    Set m_currentTable = ws.ListObjects(1)
+                Else
+                    Dim ur As Range: Set ur = ws.UsedRange
+                    If Not ur Is Nothing Then
+                        If ur.Rows.Count > 1 And ur.Columns.Count > 1 _
+                           And ur.Rows.Count <= 200000 And ur.Columns.Count <= 1000 Then
+                            Set m_currentTable = ws.ListObjects.Add(xlSrcRange, ur, , xlYes)
+                            On Error Resume Next
+                            m_currentTable.Name = tblName
+                            On Error GoTo ErrHandler
+                        End If
                     End If
                 End If
             End If
