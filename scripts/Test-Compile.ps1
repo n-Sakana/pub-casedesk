@@ -15,6 +15,17 @@ Write-Host "Opening $xlsmPath ..." -ForegroundColor Cyan
 $excel = New-Object -ComObject Excel.Application
 $excel.Visible = $false
 $excel.DisplayAlerts = $false
+# Interactive = $false blocks MsgBox / VBE modal dialogs (including "構文エラー"
+# compile error popups) that would otherwise hang the headless run.
+try { $excel.Interactive = $false } catch {}
+# Capture the PID of the Excel instance we just launched so we can kill it
+# specifically on cleanup without touching other Excel sessions (e.g. the
+# developer's own editor or a running CaseDesk worker).
+$excelPid = $null
+try {
+    Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class W{[DllImport("user32.dll")]public static extern int GetWindowThreadProcessId(IntPtr h,out int p);}' -ErrorAction SilentlyContinue
+    $null = [W]::GetWindowThreadProcessId([IntPtr]$excel.Hwnd, [ref]$excelPid)
+} catch {}
 
 $sampleWb = $null
 
@@ -57,6 +68,17 @@ Public Sub RunAllTests()
     TestCall fnum, "CaseDeskLib.EnsureConfigSheets", ""
     TestCall fnum, "CaseDeskLib.EnsureLogSheet", ""
 
+    ' --- CaseDeskLib Roles (spec 5.3) ---
+    TestCall fnum, "CaseDeskLib.GetRoleIds", ""
+    TestCall fnum, "CaseDeskLib.GetRequiredRoleIds", ""
+    TestCall fnum, "CaseDeskLib.GetRoleLabel.case_id", ""
+    TestCall fnum, "CaseDeskLib.GetRoleLabel.empty", ""
+    TestCall fnum, "CaseDeskLib.GuessRoleFromColumnName.kenmei", ""
+    TestCall fnum, "CaseDeskLib.GuessRoleFromColumnName.anken_id", ""
+    TestCall fnum, "CaseDeskLib.GuessRoleFromColumnName.status", ""
+    TestCall fnum, "CaseDeskLib.GuessRoleFromColumnName.noise", ""
+    TestCall fnum, "CaseDeskLib.MissingRequiredRoles.empty_source", ""
+
     ' --- CaseDeskData ---
     TestCall fnum, "CaseDeskData.GetWorkbookTableNames", ""
     TestCall fnum, "CaseDeskData.FindTable", ""
@@ -95,6 +117,50 @@ Private Sub TestCall(fnum As Integer, procName As String, note As String)
         Case "CaseDeskLib.EnsureLogSheet"
             CaseDeskLib.EnsureLogSheet
             result = "OK"
+        Case "CaseDeskLib.GetRoleIds"
+            Dim ri As Collection: Set ri = CaseDeskLib.GetRoleIds()
+            If ri.Count < 6 Then Err.Raise 5, , "too few roles: " & ri.Count
+            result = "OK (count=" & ri.Count & ")"
+        Case "CaseDeskLib.GetRequiredRoleIds"
+            Dim rri As Collection: Set rri = CaseDeskLib.GetRequiredRoleIds()
+            If rri.Count <> 2 Then Err.Raise 5, , "expected 2 required: " & rri.Count
+            result = "OK (count=" & rri.Count & ")"
+        Case "CaseDeskLib.GetRoleLabel.case_id"
+            Dim lab As String: lab = CaseDeskLib.GetRoleLabel("case_id")
+            If Len(lab) = 0 Or lab = "case_id" Then Err.Raise 5, , "no label: " & lab
+            result = "OK (" & lab & ")"
+        Case "CaseDeskLib.GetRoleLabel.empty"
+            Dim lab2 As String: lab2 = CaseDeskLib.GetRoleLabel("")
+            result = "OK (" & lab2 & ")"
+        Case "CaseDeskLib.GuessRoleFromColumnName.kenmei"
+            ' "件名" via ChrW — avoid `ChrW`$ because PowerShell here-string
+            ' interprets `$(...)` as a subexpression and would strip the `$`.
+            Dim g1 As String
+            g1 = CaseDeskLib.GuessRoleFromColumnName(ChrW(20214) & ChrW(21517))
+            If g1 <> "title" Then Err.Raise 5, , "expected title got: " & g1
+            result = "OK (" & g1 & ")"
+        Case "CaseDeskLib.GuessRoleFromColumnName.anken_id"
+            ' "案件ID"
+            Dim g2 As String
+            g2 = CaseDeskLib.GuessRoleFromColumnName(ChrW(26696) & ChrW(20214) & "ID")
+            If g2 <> "case_id" Then Err.Raise 5, , "expected case_id got: " & g2
+            result = "OK (" & g2 & ")"
+        Case "CaseDeskLib.GuessRoleFromColumnName.status"
+            ' "状態"
+            Dim g3 As String
+            g3 = CaseDeskLib.GuessRoleFromColumnName(ChrW(29366) & ChrW(24907))
+            If g3 <> "status" Then Err.Raise 5, , "expected status got: " & g3
+            result = "OK (" & g3 & ")"
+        Case "CaseDeskLib.GuessRoleFromColumnName.noise"
+            ' "備考欄"
+            Dim g4 As String
+            g4 = CaseDeskLib.GuessRoleFromColumnName(ChrW(20633) & ChrW(32771) & ChrW(27396))
+            If Len(g4) > 0 Then Err.Raise 5, , "expected empty for noise, got: " & g4
+            result = "OK (empty)"
+        Case "CaseDeskLib.MissingRequiredRoles.empty_source"
+            Dim mrr As Collection: Set mrr = CaseDeskLib.MissingRequiredRoles("__nonexistent_source__")
+            If mrr.Count <> 2 Then Err.Raise 5, , "expected 2 missing, got: " & mrr.Count
+            result = "OK (missing=" & mrr.Count & ")"
         Case "CaseDeskData.GetWorkbookTableNames"
             Dim tn As Collection: Set tn = CaseDeskData.GetWorkbookTableNames(ActiveWorkbook)
             result = "OK (count=" & tn.Count & ")"
@@ -200,7 +266,15 @@ End Sub
 } finally {
     try { if ($sampleWb) { $sampleWb.Close($false); [System.Runtime.InteropServices.Marshal]::ReleaseComObject($sampleWb) | Out-Null } } catch {}
     try { if ($wb) { $wb.Close($false); [System.Runtime.InteropServices.Marshal]::ReleaseComObject($wb) | Out-Null } } catch {}
-    $excel.Quit()
-    [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
+    try { $excel.Quit() } catch {}
+    try { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null } catch {}
     [GC]::Collect()
+    # Hard-kill as a last resort: if VBE is stuck in break-mode or a modal
+    # dialog slipped past Interactive=$false, $excel.Quit() will no-op and
+    # leave the process alive. Only kill the specific PID we launched — we
+    # must NOT blanket-kill EXCEL.EXE because unrelated Excel sessions
+    # (developer's editor, running worker) could have unsaved work.
+    if ($excelPid) {
+        try { Stop-Process -Id $excelPid -Force -ErrorAction SilentlyContinue } catch {}
+    }
 }

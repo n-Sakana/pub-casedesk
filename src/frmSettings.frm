@@ -44,8 +44,10 @@ Private Const GRID_ROW_H As Single = 22
 Private Sub UserForm_Initialize()
     Dim eh As New ErrorHandler: eh.Enter "frmSettings", "UserForm_Initialize"
     On Error GoTo ErrHandler
-    Me.Width = 480
-    Me.Height = 420
+    ' Widened for the Role column on the Fields tab (spec §5.3). Source tab
+    ' still fits comfortably at this width.
+    Me.Width = 560
+    Me.Height = 440
     m_suppressEvents = True
     Set m_fieldRows = CreateObject("Scripting.Dictionary")
     BuildLayout
@@ -369,33 +371,46 @@ Private Sub BuildFieldRows()
     If Not tbl Is Nothing Then
         Dim diffMsg As String: diffMsg = CaseDeskLib.DetectColumnChanges(src, tbl)
         CaseDeskLib.InitFieldSettingsFromTable src, tbl
-        If Len(diffMsg) > 0 Then MsgBox "Column changes detected:" & vbCrLf & vbCrLf & diffMsg, vbInformation, "CaseDesk"
+        If Len(diffMsg) > 0 Then PromptColumnChanges diffMsg
     Else
         Dim ws As Worksheet: Set ws = wb.Worksheets(m_cmbSheet.Text)
         If Not ws Is Nothing Then
             Dim cols As Collection: Set cols = GetColumnsFromRange(ws, src)
-            InitFieldsFromColumns src, cols, ws
+            ' Range-based sources also need column-change prompts (spec §5.5).
+            Dim rangeCols As Object: Set rangeCols = CreateObject("Scripting.Dictionary")
+            Dim rci As Long
+            For rci = 1 To cols.Count
+                rangeCols(LCase$(CStr(cols(rci)))) = CStr(cols(rci))
+            Next rci
+            Dim rangeDiff As String: rangeDiff = CaseDeskLib.DetectColumnChangesFromMap(src, rangeCols)
+            ' Delegate to CaseDeskLib for field init so role guess + type
+            ' inference are consistent with the ListObject path.
+            CaseDeskLib.InitFieldSettingsFromRange src, ws
+            If Len(rangeDiff) > 0 Then PromptColumnChanges rangeDiff
         End If
     End If
 
-    ' Column positions (proportional)
+    ' Column positions (proportional). Role column added for spec §5.3.
     Dim fw As Single: fw = m_fraFields.Width - 22
     Dim x1 As Single: x1 = 6                    ' Column name
-    Dim x2 As Single: x2 = fw * 0.25            ' Display name
-    Dim x3 As Single: x3 = fw * 0.54            ' Vis
-    Dim x4 As Single: x4 = fw * 0.62            ' Edit
-    Dim x5 As Single: x5 = fw * 0.70            ' Type
+    Dim x2 As Single: x2 = fw * 0.22            ' Display name
+    Dim x3 As Single: x3 = fw * 0.44            ' Vis
+    Dim x4 As Single: x4 = fw * 0.51            ' Edit
+    Dim x5 As Single: x5 = fw * 0.58            ' Type
+    Dim x6 As Single: x6 = fw * 0.78            ' Role
     Dim w2 As Single: w2 = x3 - x2 - 4
-    Dim w5 As Single: w5 = fw - x5
+    Dim w5 As Single: w5 = x6 - x5 - 4
+    Dim w6 As Single: w6 = fw - x6
     Dim y As Single: y = 18
 
     ' Header
     Dim lh As MSForms.Label
     Set lh = Lbl(m_fraFields, "hC", x1, 2, x2 - x1, "Column"): lh.Font.Bold = True
     Set lh = Lbl(m_fraFields, "hD", x2, 2, w2, "Display"): lh.Font.Bold = True
-    Set lh = Lbl(m_fraFields, "hV", x3, 2, 36, "Vis"): lh.Font.Bold = True
-    Set lh = Lbl(m_fraFields, "hE", x4, 2, 36, "Edit"): lh.Font.Bold = True
+    Set lh = Lbl(m_fraFields, "hV", x3, 2, 28, "Vis"): lh.Font.Bold = True
+    Set lh = Lbl(m_fraFields, "hE", x4, 2, 28, "Edit"): lh.Font.Bold = True
     Set lh = Lbl(m_fraFields, "hT", x5, 2, w5, "Type"): lh.Font.Bold = True
+    Set lh = Lbl(m_fraFields, "hR", x6, 2, w6, "Role*"): lh.Font.Bold = True
 
     Dim fields As Collection: Set fields = CaseDeskLib.GetFieldNames(src)
     Dim i As Long
@@ -428,9 +443,17 @@ Private Sub BuildFieldRows()
         SelectComboItem ct, savedType
         If ct.ListIndex < 0 Then ct.ListIndex = 0
 
+        ' Role combo — populated from CaseDeskLib.GetRoleIds() so the enum lives
+        ' in one place. Display form is "case_id — 案件ID" but we store the id.
+        Dim cr As MSForms.ComboBox: Set cr = Cmb(m_fraFields, "r2_" & i, x6, y - 2, w6)
+        cr.Height = 20: cr.Font.Size = 9
+        PopulateRoleCombo cr
+        Dim savedRole As String: savedRole = CaseDeskLib.GetFieldStr(src, fld, "role", "")
+        SelectRoleById cr, savedRole
+
         Dim row As Object: Set row = CreateObject("Scripting.Dictionary")
         Set row("display") = td: Set row("visible") = cv: Set row("editable") = ce
-        Set row("type") = ct: row("order") = CStr(i)
+        Set row("type") = ct: Set row("role") = cr: row("order") = CStr(i)
         Set m_fieldRows(fld) = row
 
         y = y + GRID_ROW_H
@@ -462,6 +485,55 @@ Private Sub ClearFieldRows()
     m_fraFields.ScrollTop = 0
 End Sub
 
+Private Sub PopulateRoleCombo(cmb As MSForms.ComboBox)
+    Dim ids As Collection: Set ids = CaseDeskLib.GetRoleIds()
+    Dim i As Long
+    For i = 1 To ids.Count
+        Dim id As String: id = CStr(ids(i))
+        Dim label As String
+        If Len(id) = 0 Then
+            label = "(none)"
+        Else
+            label = id & " — " & CaseDeskLib.GetRoleLabel(id)
+        End If
+        cmb.AddItem label
+    Next i
+    cmb.ListIndex = 0
+End Sub
+
+Private Function RoleIdFromComboText(text As String) As String
+    ' UI stores "role_id — display_name"; pull back the id prefix.
+    If Len(text) = 0 Then RoleIdFromComboText = "": Exit Function
+    If text = "(none)" Then RoleIdFromComboText = "": Exit Function
+    Dim sep As String: sep = " — "
+    Dim p As Long: p = InStr(text, sep)
+    If p > 0 Then
+        RoleIdFromComboText = Left$(text, p - 1)
+    Else
+        RoleIdFromComboText = text
+    End If
+End Function
+
+Private Sub SelectRoleById(cmb As MSForms.ComboBox, roleId As String)
+    Dim target As String
+    If Len(roleId) = 0 Then
+        target = "(none)"
+    Else
+        target = roleId & " — " & CaseDeskLib.GetRoleLabel(roleId)
+    End If
+    Dim i As Long
+    For i = 0 To cmb.ListCount - 1
+        If cmb.List(i) = target Then cmb.ListIndex = i: Exit Sub
+    Next i
+    ' Fallback: match by id prefix only
+    If Len(roleId) > 0 Then
+        For i = 0 To cmb.ListCount - 1
+            If Left$(cmb.List(i), Len(roleId)) = roleId Then cmb.ListIndex = i: Exit Sub
+        Next i
+    End If
+    cmb.ListIndex = 0
+End Sub
+
 Private Sub SelectComboItem(cmb As MSForms.ComboBox, val As String)
     If Len(val) = 0 Then Exit Sub
     Dim dv As String: dv = CaseDeskLib.StripFieldPrefix(val)
@@ -469,6 +541,14 @@ Private Sub SelectComboItem(cmb As MSForms.ComboBox, val As String)
     For i = 0 To cmb.ListCount - 1
         If cmb.List(i) = dv Or cmb.List(i) = val Then cmb.ListIndex = i: Exit Sub
     Next i
+End Sub
+
+Private Sub PromptColumnChanges(diffMsg As String)
+    ' Spec §5.5: differences must trigger a re-confirmation prompt. We surface
+    ' the diff and pre-fill roles via guessing so the user only confirms the
+    ' changed entries instead of remapping every column.
+    MsgBox "Column changes detected — please review the Fields tab:" & vbCrLf & vbCrLf & diffMsg, _
+           vbInformation, "CaseDesk"
 End Sub
 
 Private Sub InitFieldsFromColumns(src As String, cols As Collection, ws As Worksheet)
@@ -581,6 +661,89 @@ Private Sub m_cmdSave_Click()
     End If
 
     Dim src As String: src = m_cmbTable.Text
+
+    ' Build a per-visible-field intended role map from current UI state.
+    ' Validation below MUST use this (not stored m_fields values) because
+    ' edits haven't been persisted yet — otherwise clearing a role in the
+    ' grid would still pass validation against the stale stored role.
+    Dim pendingRole As Object: Set pendingRole = CreateObject("Scripting.Dictionary")
+    Dim fld1 As Variant
+    For Each fld1 In m_fieldRows.keys
+        Dim row1 As Object: Set row1 = m_fieldRows(fld1)
+        pendingRole(CStr(fld1)) = RoleIdFromComboText(CStr(row1("role").Text))
+    Next fld1
+
+    ' Role uniqueness: check both pending visible-row assignments AND stored
+    ' hidden-field assignments. Hidden fields carrying a role that the user
+    ' also assigns to a visible row must be flagged, otherwise FindFieldWithRole
+    ' becomes order-dependent after save.
+    Dim roleSeen As Object: Set roleSeen = CreateObject("Scripting.Dictionary")
+    Dim dupeRole As String
+    Dim fld0 As Variant
+    For Each fld0 In pendingRole.keys
+        Dim roleId0 As String: roleId0 = CStr(pendingRole(fld0))
+        If Len(roleId0) > 0 Then
+            If roleSeen.Exists(roleId0) Then
+                dupeRole = roleId0 & " (" & CaseDeskLib.GetRoleLabel(roleId0) & ")"
+                Exit For
+            End If
+            roleSeen(roleId0) = CStr(fld0)
+        End If
+    Next fld0
+    ' Also check: does a hidden field already carry a role that a visible row
+    ' is claiming? That's a duplicate too (two owners after save).
+    If Len(dupeRole) = 0 Then
+        Dim rsKey As Variant
+        For Each rsKey In roleSeen.keys
+            Dim existingHidden As String
+            existingHidden = CaseDeskLib.FindFieldWithRole(src, CStr(rsKey))
+            ' FindFieldWithRole returns the first stored match. If that stored
+            ' field is NOT in our pendingRole map (i.e., it's hidden), it's a
+            ' conflict with the visible assignment.
+            If Len(existingHidden) > 0 And Not pendingRole.Exists(existingHidden) Then
+                dupeRole = CStr(rsKey) & " (" & CaseDeskLib.GetRoleLabel(CStr(rsKey)) & ")" & _
+                           " — " & existingHidden & " already holds it"
+                Exit For
+            End If
+        Next rsKey
+    End If
+    If Len(dupeRole) > 0 Then
+        MsgBox "Role is assigned to two columns:" & vbCrLf & "  " & dupeRole & vbCrLf & vbCrLf & _
+               "Each role must be unique. Set one to (none).", vbExclamation, "Settings"
+        Exit Sub
+    End If
+
+    ' Required roles (case_id, title): at least one column must map to each.
+    ' Check against pending visible assignments first; only fall back to the
+    ' stored value IF that field is not represented in the visible grid
+    ' (i.e. it's a hidden `__...` setting column). A visible row that had a
+    ' role cleared must NOT be satisfied by its own stale stored value.
+    Dim missingReq As String
+    Dim requiredIds As Collection: Set requiredIds = CaseDeskLib.GetRequiredRoleIds()
+    Dim ri As Long
+    For ri = 1 To requiredIds.Count
+        Dim reqId As String: reqId = CStr(requiredIds(ri))
+        Dim satisfied As Boolean: satisfied = roleSeen.Exists(reqId)
+        If Not satisfied Then
+            Dim storedHolder As String
+            storedHolder = CaseDeskLib.FindFieldWithRole(src, reqId)
+            ' Only count a stored role holder if it's hidden (not in the
+            ' visible grid). A visible row whose role got cleared in this
+            ' session must NOT satisfy the requirement via its stale value.
+            If Len(storedHolder) > 0 And Not pendingRole.Exists(storedHolder) Then
+                satisfied = True
+            End If
+        End If
+        If Not satisfied Then
+            missingReq = missingReq & "  - " & reqId & " (" & CaseDeskLib.GetRoleLabel(reqId) & ")" & vbCrLf
+        End If
+    Next ri
+    If Len(missingReq) > 0 Then
+        MsgBox "Required roles are not assigned:" & vbCrLf & vbCrLf & missingReq & vbCrLf & _
+               "Map each required role to a column on the Fields tab.", vbExclamation, "Settings"
+        Exit Sub
+    End If
+
     ' Remove old source entries that differ from current selection
     Dim oldSources As Collection: Set oldSources = CaseDeskLib.GetSourceNames()
     Dim os As Long
@@ -597,15 +760,17 @@ Private Sub m_cmdSave_Click()
     CaseDeskLib.SetSourceStr src, "mail_link_column", m_cmbMailLink.Text
 
     Dim fld As Variant
-    For Each fld In m_fieldRows.Keys
+    For Each fld In m_fieldRows.keys
         Dim row As Object: Set row = m_fieldRows(fld)
         Dim ft As String: ft = CStr(row("type").Text)
+        Dim roleId As String: roleId = RoleIdFromComboText(CStr(row("role").Text))
         CaseDeskLib.SetFieldStr src, CStr(fld), "display_name", Trim$(CStr(row("display").Text))
         CaseDeskLib.SetFieldBool src, CStr(fld), "visible", CBool(row("visible").Value)
         CaseDeskLib.SetFieldBool src, CStr(fld), "in_list", CBool(row("visible").Value)
         CaseDeskLib.SetFieldBool src, CStr(fld), "editable", CBool(row("editable").Value)
         CaseDeskLib.SetFieldStr src, CStr(fld), "type", ft
         CaseDeskLib.SetFieldBool src, CStr(fld), "multiline", (ft = "multiline")
+        CaseDeskLib.SetFieldStr src, CStr(fld), "role", roleId
         CaseDeskLib.SetFieldStr src, CStr(fld), "sort_order", CStr(row("order"))
     Next fld
 

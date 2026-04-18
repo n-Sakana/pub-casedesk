@@ -700,6 +700,261 @@ Public Function GetFieldDisplayName(src As String, fld As String) As String
 End Function
 
 ' ============================================================================
+' Roles (spec §5.3) — per-field CaseDesk role
+'
+' Available roles and required set live here so the UI and the validator
+' can't drift. `case_id` and `title` are required to save; the others are
+' optional aliases the bot can consult at runtime.
+' ============================================================================
+
+Public Function GetRoleIds() As Collection
+    Set GetRoleIds = New Collection
+    GetRoleIds.Add ""           ' (none) — column with no role
+    GetRoleIds.Add "case_id"
+    GetRoleIds.Add "title"
+    GetRoleIds.Add "status"
+    GetRoleIds.Add "file_key"
+    GetRoleIds.Add "updated_at"
+    GetRoleIds.Add "mail_link"
+End Function
+
+Public Function GetRequiredRoleIds() As Collection
+    Set GetRequiredRoleIds = New Collection
+    GetRequiredRoleIds.Add "case_id"
+    GetRequiredRoleIds.Add "title"
+End Function
+
+Public Function GetRoleLabel(roleId As String) As String
+    ' Labels built via ChrW() to be encoding-pipeline independent.
+    Select Case LCase$(roleId)
+        Case "": GetRoleLabel = "(none)"
+        Case "case_id": GetRoleLabel = ChrW(26696) & ChrW(20214) & "ID"                         ' 案件ID
+        Case "title": GetRoleLabel = ChrW(20214) & ChrW(21517)                                   ' 件名
+        Case "status": GetRoleLabel = ChrW(29366) & ChrW(24907)                                  ' 状態
+        Case "file_key": GetRoleLabel = ChrW(12501) & ChrW(12449) & ChrW(12452) & ChrW(12523) & ChrW(12461) & ChrW(12540) ' ファイルキー
+        Case "updated_at": GetRoleLabel = ChrW(26356) & ChrW(26032) & ChrW(26085) & ChrW(26178)  ' 更新日時
+        Case "mail_link": GetRoleLabel = ChrW(12513) & ChrW(12540) & ChrW(12523) & ChrW(12522) & ChrW(12531) & ChrW(12463) ' メールリンク
+        Case Else: GetRoleLabel = roleId
+    End Select
+End Function
+
+Public Function GuessRoleFromColumnName(colName As String) As String
+    ' Heuristic: map a column header to a known role when it looks like a
+    ' standard Japanese/English ledger column. Return "" if nothing matches —
+    ' the user resolves the rest manually in the field grid.
+    '
+    ' Japanese keywords are built via ChrW() so the source encoding pipeline
+    ' (file UTF-8 → PowerShell string → VBE AddFromString → VBA parser)
+    ' cannot mangle multi-byte literals in a way that breaks `_` line-
+    ' continuations or identifiers.
+    GuessRoleFromColumnName = ""
+    If Len(colName) = 0 Then Exit Function
+    Dim n As String: n = LCase$(Trim$(colName))
+
+    ' Build keyword constants once per call (cheap; easier to audit than
+    ' file-encoding hygiene).
+    Dim kw As Object: Set kw = BuildRoleKeywords()
+
+    ' case_id: exact-match set + substring set
+    If MatchesAny(n, kw("case_id_eq"), True) Then GuessRoleFromColumnName = "case_id": Exit Function
+    If MatchesAny(n, kw("case_id_in"), False) Then GuessRoleFromColumnName = "case_id": Exit Function
+
+    ' title (substring for 件名, タイトル, 案件名, 題名, subject)
+    If MatchesAny(n, kw("title_eq"), True) Then GuessRoleFromColumnName = "title": Exit Function
+    If MatchesAny(n, kw("title_in"), False) Then GuessRoleFromColumnName = "title": Exit Function
+
+    ' status
+    If MatchesAny(n, kw("status_eq"), True) Then GuessRoleFromColumnName = "status": Exit Function
+    If MatchesAny(n, kw("status_in"), False) Then GuessRoleFromColumnName = "status": Exit Function
+
+    ' file_key
+    If MatchesAny(n, kw("file_key_eq"), True) Then GuessRoleFromColumnName = "file_key": Exit Function
+    If MatchesAny(n, kw("file_key_in"), False) Then GuessRoleFromColumnName = "file_key": Exit Function
+
+    ' updated_at
+    If MatchesAny(n, kw("updated_at_eq"), True) Then GuessRoleFromColumnName = "updated_at": Exit Function
+    If MatchesAny(n, kw("updated_at_in"), False) Then GuessRoleFromColumnName = "updated_at": Exit Function
+
+    ' mail_link
+    If MatchesAny(n, kw("mail_link_eq"), True) Then GuessRoleFromColumnName = "mail_link": Exit Function
+    If MatchesAny(n, kw("mail_link_in"), False) Then GuessRoleFromColumnName = "mail_link": Exit Function
+End Function
+
+Private Function MatchesAny(haystack As String, needles As Collection, exactMatch As Boolean) As Boolean
+    Dim i As Long
+    For i = 1 To needles.Count
+        Dim needle As String: needle = CStr(needles(i))
+        If exactMatch Then
+            If haystack = needle Then MatchesAny = True: Exit Function
+        Else
+            If InStr(haystack, needle) > 0 Then MatchesAny = True: Exit Function
+        End If
+    Next i
+End Function
+
+Private Function BuildRoleKeywords() As Object
+    ' ChrW() escapes keep the Japanese keywords independent of the .bas
+    ' file's encoding round-trip. See GuessRoleFromColumnName's docstring.
+    Dim d As Object: Set d = CreateObject("Scripting.Dictionary")
+
+    ' --- case_id ---
+    Dim caseIdEq As New Collection
+    caseIdEq.Add "id"
+    caseIdEq.Add "no"
+    caseIdEq.Add "#"
+    Set d("case_id_eq") = caseIdEq
+    Dim caseIdIn As New Collection
+    caseIdIn.Add ChrW(26696) & ChrW(20214) & "id"            ' 案件id
+    caseIdIn.Add ChrW(26696) & ChrW(20214) & ChrW(30058) & ChrW(21495) ' 案件番号
+    caseIdIn.Add ChrW(26696) & ChrW(20214) & "no"            ' 案件no
+    caseIdIn.Add "case_id"
+    caseIdIn.Add "case id"
+    caseIdIn.Add "caseid"       ' CamelCase "CaseId" → lower "caseid"
+    caseIdIn.Add "recordid"     ' CamelCase "RecordId" (used by Build-Sample)
+    caseIdIn.Add "record_id"
+    caseIdIn.Add "record id"
+    caseIdIn.Add ChrW(21463) & ChrW(20184) & ChrW(30058) & ChrW(21495) ' 受付番号
+    caseIdIn.Add ChrW(31649) & ChrW(29702) & ChrW(30058) & ChrW(21495) ' 管理番号
+    Set d("case_id_in") = caseIdIn
+
+    ' --- title ---
+    Dim titleEq As New Collection
+    titleEq.Add ChrW(20214) & ChrW(21517)   ' 件名
+    titleEq.Add "title"
+    titleEq.Add "subject"
+    Set d("title_eq") = titleEq
+    Dim titleIn As New Collection
+    titleIn.Add ChrW(12479) & ChrW(12452) & ChrW(12488) & ChrW(12523) ' タイトル
+    titleIn.Add ChrW(26696) & ChrW(20214) & ChrW(21517) ' 案件名
+    titleIn.Add ChrW(38988) & ChrW(21517)   ' 題名
+    Set d("title_in") = titleIn
+
+    ' --- status ---
+    Dim statusEq As New Collection
+    statusEq.Add ChrW(29366) & ChrW(24907)  ' 状態
+    statusEq.Add ChrW(12473) & ChrW(12486) & ChrW(12540) & ChrW(12479) & ChrW(12473) ' ステータス
+    statusEq.Add "status"
+    statusEq.Add "state"
+    statusEq.Add "stage"
+    Set d("status_eq") = statusEq
+    Dim statusIn As New Collection
+    statusIn.Add ChrW(36914) & ChrW(25431)  ' 進捗
+    statusIn.Add ChrW(36914) & ChrW(34892)  ' 進行
+    statusIn.Add ChrW(21306) & ChrW(20998)  ' 区分
+    Set d("status_in") = statusIn
+
+    ' --- file_key ---
+    Dim fileKeyEq As New Collection
+    fileKeyEq.Add "file_key"
+    fileKeyEq.Add "filekey"
+    fileKeyEq.Add "folder_key"
+    Set d("file_key_eq") = fileKeyEq
+    Dim fileKeyIn As New Collection
+    fileKeyIn.Add ChrW(12501) & ChrW(12449) & ChrW(12452) & ChrW(12523) & ChrW(12461) & ChrW(12540) ' ファイルキー
+    fileKeyIn.Add ChrW(12501) & ChrW(12457) & ChrW(12523) & ChrW(12480) & ChrW(21517) ' フォルダ名
+    fileKeyIn.Add ChrW(12501) & ChrW(12457) & ChrW(12523) & ChrW(12480) & ChrW(12540) & ChrW(21517) ' フォルダー名
+    Set d("file_key_in") = fileKeyIn
+
+    ' --- updated_at ---
+    Dim updatedEq As New Collection
+    updatedEq.Add "updated_at"
+    updatedEq.Add "updated"
+    updatedEq.Add "modified"
+    Set d("updated_at_eq") = updatedEq
+    Dim updatedIn As New Collection
+    updatedIn.Add ChrW(26356) & ChrW(26032) & ChrW(26085) & ChrW(26178) ' 更新日時
+    updatedIn.Add ChrW(26356) & ChrW(26032) & ChrW(26085) ' 更新日
+    updatedIn.Add ChrW(26368) & ChrW(32066) & ChrW(26356) & ChrW(26032) ' 最終更新
+    updatedIn.Add "last update"
+    Set d("updated_at_in") = updatedIn
+
+    ' --- mail_link ---
+    Dim mailEq As New Collection
+    mailEq.Add "mail_link"
+    mailEq.Add "maillink"
+    Set d("mail_link_eq") = mailEq
+    Dim mailIn As New Collection
+    mailIn.Add ChrW(24046) & ChrW(20986) & ChrW(20154) ' 差出人
+    mailIn.Add ChrW(12513) & ChrW(12450) & ChrW(12489) ' メアド
+    mailIn.Add ChrW(12513) & ChrW(12540) & ChrW(12523) & ChrW(12450) & ChrW(12489) & ChrW(12524) & ChrW(12473) ' メールアドレス
+    mailIn.Add ChrW(12513) & ChrW(12540) & ChrW(12523) & ChrW(12522) & ChrW(12531) & ChrW(12463) ' メールリンク
+    mailIn.Add ChrW(12513) & ChrW(12540) & ChrW(12523) & "link" ' メールlink
+    Set d("mail_link_in") = mailIn
+
+    Set BuildRoleKeywords = d
+End Function
+
+Public Function FindFieldWithRole(src As String, roleId As String) As String
+    ' Return the first field name whose `role` equals roleId, or "" if none.
+    FindFieldWithRole = ""
+    If Len(roleId) = 0 Then Exit Function
+    If Not m_loaded Then EnsureConfigSheets
+    Dim prefix As String: prefix = LCase$(src) & "|"
+    Dim k As Variant
+    For Each k In m_fields.keys
+        If Left$(CStr(k), Len(prefix)) = prefix Then
+            Dim fd As Object: Set fd = m_fields(k)
+            If LCase$(DictStr(fd, "role")) = LCase$(roleId) Then
+                FindFieldWithRole = CStr(fd("field_name")): Exit Function
+            End If
+        End If
+    Next k
+End Function
+
+Public Function MissingRequiredRoles(src As String) As Collection
+    ' Return the collection of required role IDs NOT assigned to any field
+    ' for this source. Empty collection means all required roles present.
+    Set MissingRequiredRoles = New Collection
+    Dim required As Collection: Set required = GetRequiredRoleIds()
+    Dim i As Long
+    For i = 1 To required.Count
+        Dim roleId As String: roleId = CStr(required(i))
+        If Len(FindFieldWithRole(src, roleId)) = 0 Then
+            MissingRequiredRoles.Add roleId
+        End If
+    Next i
+End Function
+
+Public Function GuessFieldTypeFromValues(ws As Worksheet, col As Long, _
+                                         headerRow As Long, sampleLimit As Long) As String
+    ' Inspect up to sampleLimit non-empty values below headerRow to pick the
+    ' most specific data type. Priority: date > currency > number > text.
+    ' Used for range-based sources (no ListObject available).
+    GuessFieldTypeFromValues = "text"
+    On Error Resume Next
+    Dim lastRow As Long: lastRow = ws.Cells(ws.Rows.Count, col).End(xlUp).Row
+    If lastRow <= headerRow Then Exit Function
+    Dim upperBound As Long: upperBound = headerRow + sampleLimit
+    If upperBound > lastRow Then upperBound = lastRow
+
+    Dim anyDate As Boolean, anyCurrency As Boolean, anyNumber As Boolean
+    Dim seenValues As Long: seenValues = 0
+    Dim r As Long
+    For r = headerRow + 1 To upperBound
+        Dim cell As Range: Set cell = ws.Cells(r, col)
+        Dim v As Variant: v = cell.Value
+        If IsEmpty(v) Or IsNull(v) Then GoTo NextSample
+        If Len(CStr(v)) = 0 Then GoTo NextSample
+        seenValues = seenValues + 1
+        If VarType(v) = vbDate Then anyDate = True
+        If VarType(v) = vbCurrency Then anyCurrency = True
+        If VarType(v) = vbDouble Or VarType(v) = vbLong Or _
+           VarType(v) = vbInteger Or VarType(v) = vbSingle Then anyNumber = True
+        ' NumberFormat heuristics for display-formatted values
+        Dim fmt As String: fmt = CStr(cell.NumberFormat)
+        If fmt Like "*yy*" Or fmt Like "*mm*dd*" Then anyDate = True
+        If fmt Like "*" & ChrW$(165) & "*" Or fmt Like "*$*" Then anyCurrency = True
+NextSample:
+    Next r
+    On Error GoTo 0
+
+    If seenValues = 0 Then Exit Function
+    If anyDate Then GuessFieldTypeFromValues = "date": Exit Function
+    If anyCurrency Then GuessFieldTypeFromValues = "currency": Exit Function
+    If anyNumber Then GuessFieldTypeFromValues = "number": Exit Function
+End Function
+
+' ============================================================================
 ' Field Settings Auto-Init
 ' ============================================================================
 
@@ -709,13 +964,22 @@ Public Sub InitFieldSettingsFromTable(src As String, tbl As ListObject)
     ' Build set of current table columns
     Dim currentCols As Object: Set currentCols = CreateObject("Scripting.Dictionary")
     Dim col As ListColumn
+    For Each col In tbl.ListColumns
+        currentCols(LCase$(col.Name)) = col.Name
+    Next col
+
+    ' Remove stale field entries FIRST so FindFieldWithRole doesn't return
+    ' a role held by a column that no longer exists. Otherwise a rename
+    ' (old column removed, new column added) would leave the role on the
+    ' phantom old field during the new column's init, and the new column
+    ' would be initialized with role="" instead of inheriting the guess.
+    PurgeStaleFieldsFromMap src, currentCols
+
     Dim ordinal As Long: ordinal = 0
     For Each col In tbl.ListColumns
         On Error Resume Next
         Err.Clear
         ordinal = ordinal + 1
-        ' Track all columns (including hidden) for stale removal
-        currentCols(LCase$(col.Name)) = col.Name
         ' Skip hidden (__AAA) fields from UI field list
         If IsHiddenField(col.Name) Then GoTo NextCol
         Dim fk As String: fk = LCase$(src) & "|" & LCase$(col.Name)
@@ -725,7 +989,19 @@ Public Sub InitFieldSettingsFromTable(src As String, tbl As ListObject)
             SetFieldStr src, col.Name, "multiline", CStr(GuessMultiline(col))
             SetFieldStr src, col.Name, "display_name", StripFieldPrefix(col.Name)
             SetFieldStr src, col.Name, "visible", CStr(True)
-            SetFieldStr src, col.Name, "role", ""
+            ' Guess role from header name. Only claim the role if no other
+            ' field in this source already has it — first-come-first-served
+            ' so repeated inits don't thrash the user's manual assignment.
+            Dim guessedRole As String: guessedRole = GuessRoleFromColumnName(col.Name)
+            If Len(guessedRole) > 0 Then
+                If Len(FindFieldWithRole(src, guessedRole)) = 0 Then
+                    SetFieldStr src, col.Name, "role", guessedRole
+                Else
+                    SetFieldStr src, col.Name, "role", ""
+                End If
+            Else
+                SetFieldStr src, col.Name, "role", ""
+            End If
             SetFieldStr src, col.Name, "sort_order", CStr(ordinal)
             ' Read-only prefix (_xx_AAA) -> editable=False
             If IsReadOnlyField(col.Name) Then
@@ -741,12 +1017,27 @@ Public Sub InitFieldSettingsFromTable(src As String, tbl As ListObject)
             If Len(GetFieldStr(src, col.Name, "sort_order")) = 0 Then
                 SetFieldStr src, col.Name, "sort_order", CStr(ordinal)
             End If
+            ' Upgrade path: existing pre-R3 field has no role set. Try the
+            ' heuristic so users don't hit "required role missing" on Save
+            ' just because their config predates the role column.
+            If Len(GetFieldStr(src, col.Name, "role")) = 0 Then
+                Dim upgradeRole As String: upgradeRole = GuessRoleFromColumnName(col.Name)
+                If Len(upgradeRole) > 0 And Len(FindFieldWithRole(src, upgradeRole)) = 0 Then
+                    SetFieldStr src, col.Name, "role", upgradeRole
+                End If
+            End If
         End If
 NextCol:
         On Error GoTo 0
     Next col
+    ' (stale field removal already performed above via PurgeStaleFieldsFromMap)
+End Sub
 
-    ' Remove field entries for columns that no longer exist in the table
+Private Sub PurgeStaleFieldsFromMap(src As String, currentCols As Object)
+    ' Delete saved field entries whose column no longer exists in the source.
+    ' Called BEFORE the per-column init loop so role guessing sees an accurate
+    ' FindFieldWithRole result (otherwise a renamed column's new name gets
+    ' role="" because the old phantom field still holds the role).
     Dim prefix As String: prefix = LCase$(src) & "|"
     Dim toRemove As New Collection
     Dim k As Variant
@@ -791,8 +1082,22 @@ Public Sub InitFieldSettingsFromRange(src As String, ws As Worksheet)
     Dim startCol As Long: startCol = ur.Column
     Dim nCols As Long: nCols = ur.Columns.Count
 
-    ' Build set of current columns
+    ' First pass: collect current column names (needed to purge stale fields
+    ' BEFORE the init loop — same reasoning as InitFieldSettingsFromTable,
+    ' otherwise FindFieldWithRole would return phantoms from renamed columns).
     Dim currentCols As Object: Set currentCols = CreateObject("Scripting.Dictionary")
+    Dim preC As Long
+    For preC = 0 To nCols - 1
+        On Error Resume Next
+        Dim preV As Variant: preV = ws.Cells(headerRow, startCol + preC).Value
+        On Error GoTo 0
+        If Not IsEmpty(preV) And Len(CStr(preV)) > 0 Then
+            currentCols(LCase$(CStr(preV))) = CStr(preV)
+        End If
+    Next preC
+    PurgeStaleFieldsFromMap src, currentCols
+
+    ' Second pass: init/update each field.
     Dim ordinal As Long: ordinal = 0
     Dim c As Long
     For c = 0 To nCols - 1
@@ -803,7 +1108,6 @@ Public Sub InitFieldSettingsFromRange(src As String, ws As Worksheet)
         If IsEmpty(cv) Or Len(CStr(cv)) = 0 Then GoTo NextRangeCol
         colName = CStr(cv)
         ordinal = ordinal + 1
-        currentCols(LCase$(colName)) = colName
 
         If IsHiddenField(colName) Then GoTo NextRangeCol
         Dim fk As String: fk = LCase$(src) & "|" & LCase$(colName)
@@ -811,18 +1115,21 @@ Public Sub InitFieldSettingsFromRange(src As String, ws As Worksheet)
             EnsureField src, colName
             SetFieldStr src, colName, "display_name", StripFieldPrefix(colName)
             SetFieldStr src, colName, "visible", CStr(True)
-            SetFieldStr src, colName, "role", ""
-            SetFieldStr src, colName, "sort_order", CStr(ordinal)
-            ' Guess type from cell data
-            Dim guessType As String: guessType = "text"
-            Dim sampleRow As Long: sampleRow = headerRow + 1
-            If sampleRow <= ws.Cells(ws.Rows.Count, startCol + c).End(xlUp).Row Then
-                Dim sv As Variant: sv = ws.Cells(sampleRow, startCol + c).Value
-                If Not IsEmpty(sv) And Not IsNull(sv) Then
-                    If VarType(sv) = vbDate Then guessType = "date"
-                    If VarType(sv) = vbDouble Or VarType(sv) = vbLong Or VarType(sv) = vbInteger Then guessType = "number"
+            ' Guess role from header name. First-come-first-served per source.
+            Dim guessedRole As String: guessedRole = GuessRoleFromColumnName(colName)
+            If Len(guessedRole) > 0 Then
+                If Len(FindFieldWithRole(src, guessedRole)) = 0 Then
+                    SetFieldStr src, colName, "role", guessedRole
+                Else
+                    SetFieldStr src, colName, "role", ""
                 End If
+            Else
+                SetFieldStr src, colName, "role", ""
             End If
+            SetFieldStr src, colName, "sort_order", CStr(ordinal)
+            ' Sample up to 10 non-empty values to pick type (date > currency > number > text).
+            Dim guessType As String
+            guessType = GuessFieldTypeFromValues(ws, startCol + c, headerRow, 10)
             SetFieldStr src, colName, "type", guessType
             If IsReadOnlyField(colName) Then
                 SetFieldStr src, colName, "editable", CStr(False)
@@ -834,33 +1141,38 @@ Public Sub InitFieldSettingsFromRange(src As String, ws As Worksheet)
             If Len(GetFieldStr(src, colName, "sort_order")) = 0 Then
                 SetFieldStr src, colName, "sort_order", CStr(ordinal)
             End If
+            ' Upgrade path: same as InitFieldSettingsFromTable.
+            If Len(GetFieldStr(src, colName, "role")) = 0 Then
+                Dim upgradeRole2 As String: upgradeRole2 = GuessRoleFromColumnName(colName)
+                If Len(upgradeRole2) > 0 And Len(FindFieldWithRole(src, upgradeRole2)) = 0 Then
+                    SetFieldStr src, colName, "role", upgradeRole2
+                End If
+            End If
         End If
         On Error GoTo 0
 NextRangeCol:
     Next c
-
-    ' Remove stale field entries
-    Dim prefix As String: prefix = LCase$(src) & "|"
-    Dim toRemove As New Collection
-    Dim k As Variant
-    For Each k In m_fields.keys
-        If Left$(CStr(k), Len(prefix)) = prefix Then
-            Dim cn As String: cn = Mid$(CStr(k), Len(prefix) + 1)
-            If Not currentCols.Exists(cn) Then toRemove.Add CStr(k)
-        End If
-    Next k
-    Dim ri As Long
-    For ri = 1 To toRemove.Count
-        m_fields.Remove CStr(toRemove(ri))
-        m_dirty = True
-    Next ri
+    ' (stale field removal already performed above via PurgeStaleFieldsFromMap)
 End Sub
 
 Public Function DetectColumnChanges(src As String, tbl As ListObject) As String
-    If Not m_loaded Then EnsureConfigSheets
-    DetectColumnChanges = ""
+    ' Diff a table's current columns against saved field settings.
+    Dim currentCols As Object: Set currentCols = CreateObject("Scripting.Dictionary")
+    Dim col As ListColumn
+    For Each col In tbl.ListColumns
+        currentCols(LCase$(col.Name)) = col.Name
+    Next col
+    DetectColumnChanges = DetectColumnChangesFromMap(src, currentCols)
+End Function
 
-    ' Get saved field names for this source
+Public Function DetectColumnChangesFromMap(src As String, currentCols As Object) As String
+    ' Shared implementation: diff any lower-cased->original-cased map of column
+    ' names against saved field settings. Used by both ListObject and range
+    ' sources so the spec §5.5 "差分を検出し、再確認を要求する" requirement
+    ' fires regardless of the source type.
+    If Not m_loaded Then EnsureConfigSheets
+    DetectColumnChangesFromMap = ""
+
     Dim prefix As String: prefix = LCase$(src) & "|"
     Dim savedCols As Object: Set savedCols = CreateObject("Scripting.Dictionary")
     Dim k As Variant
@@ -872,13 +1184,6 @@ Public Function DetectColumnChanges(src As String, tbl As ListObject) As String
     Next k
     If savedCols.Count = 0 Then Exit Function ' First time, no diff
 
-    ' Get current table columns
-    Dim currentCols As Object: Set currentCols = CreateObject("Scripting.Dictionary")
-    Dim col As ListColumn
-    For Each col In tbl.ListColumns
-        currentCols(LCase$(col.Name)) = col.Name
-    Next col
-
     ' Detect added columns (skip hidden __ fields)
     Dim added As String
     For Each k In currentCols.keys
@@ -889,19 +1194,21 @@ Public Function DetectColumnChanges(src As String, tbl As ListObject) As String
         End If
     Next k
 
-    ' Detect removed columns
+    ' Detect removed columns. Hidden `__...` fields are valid setting columns
+    ' (key_column / mail_link_column etc. often live there), so a removal of
+    ' a hidden column is *more* critical to surface, not less — downstream
+    ' lookups silently start returning empty values otherwise.
     Dim removed As String
     For Each k In savedCols.keys
         If Not currentCols.Exists(CStr(k)) Then
-            ' Resolve original casing from saved data
             Dim fd As Object: Set fd = m_fields(prefix & CStr(k))
             Dim origName As String: origName = DictStr(fd, "field_name", CStr(k))
             removed = removed & "  - " & origName & vbCrLf
         End If
     Next k
 
-    If Len(added) > 0 Then DetectColumnChanges = "Added:" & vbCrLf & added
-    If Len(removed) > 0 Then DetectColumnChanges = DetectColumnChanges & "Removed:" & vbCrLf & removed
+    If Len(added) > 0 Then DetectColumnChangesFromMap = "Added:" & vbCrLf & added
+    If Len(removed) > 0 Then DetectColumnChangesFromMap = DetectColumnChangesFromMap & "Removed:" & vbCrLf & removed
 End Function
 
 Private Function SortedFieldNames(src As String, visibleOnly As Boolean) As Collection
