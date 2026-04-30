@@ -1,28 +1,28 @@
 # AGENTS.md - pub/casedesk
 
-Codex 用の入口メモです。repo 固有の詳細は [README.md](README.md) と [CLAUDE.md](CLAUDE.md)、横断トポロジは [fin/hub/ARCHITECTURE.md](../../fin/hub/ARCHITECTURE.md) を参照してください。
+Entry-point notes for Codex. For repo-specific details see [README.md](README.md) and [CLAUDE.md](CLAUDE.md); for cross-cutting topology see [fin/hub/ARCHITECTURE.md](../../fin/hub/ARCHITECTURE.md).
 
-## 役割
+## Role
 
-- Excel VBA の案件管理アドイン
-- `watchbox` が生成した `manifest.csv` を読み、案件・メール・ファイルを 1 画面で扱う
-- FE/BE を別 Excel プロセスで分離する
+- Excel VBA add-in for case management
+- Reads the `manifest.csv` produced by `watchbox` and handles cases, mail, and files in a single screen
+- Splits FE/BE into separate Excel processes
 
-## runtime / 接続
+## runtime / connections
 
 - runtime: local Windows + Excel only
-- data contract: `pub/watchbox` の `manifest.csv`, `log.csv`
-- transport: hidden sheets への書き込み + `Workbook_SheetChange`
+- data contract: `manifest.csv`, `log.csv` from `pub/watchbox`
+- transport: writes to hidden sheets + `Workbook_SheetChange`
 
-## まず見る場所
+## Where to look first
 
-- `src/CaseDeskMain.bas` - エントリポイント / BE 管理
-- `src/CaseDeskWorker.bas` - BE 側 scan / manifest 読み込み
-- `src/CaseDeskData.bas` - FE 側キャッシュ
+- `src/CaseDeskMain.bas` - entry point / BE management
+- `src/CaseDeskWorker.bas` - BE-side scan / manifest loading
+- `src/CaseDeskData.bas` - FE-side cache
 - `src/frmCaseDesk.frm`, `src/frmSettings.frm` - UI
-- `docs/spec.md` - 詳細仕様
+- `docs/spec.md` - detailed spec
 
-## 開発コマンド
+## Dev commands
 
 ```bat
 samplerun.bat
@@ -35,9 +35,9 @@ powershell -ExecutionPolicy Bypass -File scripts/Test-Compile.ps1
 powershell -ExecutionPolicy Bypass -File scripts/Test-Worker.ps1
 ```
 
-## ガードレール
+## Guardrails
 
-- ランタイムコードは VBA のみ。WinAPI を追加しない
-- FE/BE 分離を崩さない
-- `watchbox` の manifest 契約を片側だけで変えない
-- hidden-sheet 名と Workbook event ベースの通信を前提にする
+- Runtime code is VBA only. Do not add WinAPI calls
+- Do not break the FE/BE separation
+- Do not change the `watchbox` manifest contract on only one side
+- Assume hidden-sheet names and Workbook-event-based communication
