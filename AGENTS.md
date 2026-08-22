@@ -1,28 +1,31 @@
-# AGENTS.md - pub/casedesk
+# AGENTS.md — pub/casedesk
 
-Entry-point notes for Codex. For repo-specific details see [README.md](README.md) and [CLAUDE.md](CLAUDE.md); for cross-cutting topology see [fin/hub/ARCHITECTURE.md](../../fin/hub/ARCHITECTURE.md).
+## 役割
 
-## Role
+CaseDesk は、Excelの表、watchboxが生成したメール・案件ファイルの `manifest.csv`、変更履歴を一画面で扱うVBA製品です。ローカルWindowsとExcelで動きます。
 
-- Excel VBA add-in for case management
-- Reads the `manifest.csv` produced by `watchbox` and handles cases, mail, and files in a single screen
-- Splits FE/BE into separate Excel processes
+詳細は [README.md](README.md) と [docs/spec.md](docs/spec.md) を参照してください。watchboxとの境界は [pub/watchbox/README.md](../watchbox/README.md) が正本です。
 
-## runtime / connections
+## 現行アーキテクチャ
 
-- runtime: local Windows + Excel only
-- data contract: `manifest.csv`, `log.csv` from `pub/watchbox`
-- transport: writes to hidden sheets + `Workbook_SheetChange`
+- FE: ユーザーが操作する `casedesk.xlsm`
+- BE: 別プロセスの非表示 `Excel.Application`
+- BEの役割: manifest走査、案件・メールの収集、FE hidden sheetへの書込み
+- FEの役割: UI、設定、hidden sheetから読み込んだDictionary cache、対象tableの読書き
+- 通知: BEがhidden sheetへ `.Value` を書き、FEが `Workbook_SheetChange` で受ける
 
-## Where to look first
+「データcacheはすべてBE」という旧説明は使いません。BEにもcacheがあり、FEも受信済みデータをDictionaryへ読み込んで表示・検索します。
 
-- `src/CaseDeskMain.bas` - entry point / BE management
-- `src/CaseDeskWorker.bas` - BE-side scan / manifest loading
-- `src/CaseDeskData.bas` - FE-side cache
-- `src/frmCaseDesk.frm`, `src/frmSettings.frm` - UI
-- `docs/spec.md` - detailed spec
+## 読む順番
 
-## Dev commands
+1. [README.md](README.md)
+2. [docs/spec.md](docs/spec.md)
+3. `src/CaseDeskMain.bas`
+4. `src/CaseDeskWorker.bas`
+5. `src/CaseDeskData.bas`
+6. `src/frmCaseDesk.frm`、`src/frmSettings.frm`
+
+## build / test
 
 ```bat
 samplerun.bat
@@ -35,9 +38,13 @@ powershell -ExecutionPolicy Bypass -File scripts/Test-Compile.ps1
 powershell -ExecutionPolicy Bypass -File scripts/Test-Worker.ps1
 ```
 
-## Guardrails
+## 変更時の原則
 
-- Runtime code is VBA only. Do not add WinAPI calls
-- Do not break the FE/BE separation
-- Do not change the `watchbox` manifest contract on only one side
-- Assume hidden-sheet names and Workbook-event-based communication
+- 製品runtimeはVBAで保つ。build・test scriptはこの制約の外です。
+- 製品VBAにWin32 API、Shell、WMI、外部helper依存を持ち込まない。
+- FE / BEの別Excelプロセス構成を維持する。
+- FEとBEの終了・参照解放を変更するときは、実Excelプロセスの残留まで確認する。
+- `manifest.csv` のheaderを変えるときは、watchboxとCaseDeskを同時に確認する。
+- hidden sheet名、event経路、FE cache、BE cacheのどれを変えたかを区別する。
+- `frmCaseDeskV2` や `CaseDesk_ShowPanel2` は現行実装ではない。構想メモを製品契約に混ぜない。
+- build成功だけで完成としない。通常起動、主要画面、検索、選択、保存、終了保護を実Excelで確認する。

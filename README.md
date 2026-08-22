@@ -159,5 +159,6 @@ casedesk/
 ├── samplerun.bat
 ├── build-addin.bat
 ├── build-sample.bat
+├── AGENTS.md
 └── CLAUDE.md
 ```
